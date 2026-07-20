@@ -2295,7 +2295,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 1.0";
+const APP_VERSION = "LIVE 1.1";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■"];
@@ -2307,6 +2307,16 @@ const SEED_QUESTIONS = [
   { q: "형성평가의 주된 목적으로 가장 적절한 것은?", choices: ["최종 성적 산출","학습 과정 중 개선 정보 제공","수업 만족도 조사","입학 자격 판정"], answer: 1, expl: "형성평가는 교수·학습 진행 중 개선을 위한 피드백을 제공합니다." },
   { q: "Community of Inquiry(CoI) 모형의 3요소가 아닌 것은?", choices: ["교수 실재감","사회적 실재감","인지적 실재감","물리적 실재감"], answer: 3, expl: "CoI는 교수·사회적·인지적 실재감으로 구성됩니다." },
 ];
+
+const ACT_TYPES = {BRD:"협업 보드",QZG:"게임 퀴즈",QZS:"자기속도 퀴즈",POL:"즉석 투표",EXT:"Exit Ticket",SIG:"신호등",SGQ:"학생 출제"};
+const FLOW_TEMPLATES = {
+  "플립러닝": { desc: "사전학습 데이터로 본 수업을 조정하는 구조 (JiTT)", blocks: [["QZS","사전학습 확인 퀴즈","수업 전"],["POL","사전학습 난이도 체감","5분"],["BRD","팀 활동·사례 분석","20분"],["QZG","정리 퀴즈","15분"],["EXT","Exit Ticket","자동"]] },
+  "PBL": { desc: "실제적 문제 중심의 팀 탐구 (문제기반학습)", blocks: [["BRD","문제 제시·쟁점 브레인스토밍","10분"],["BRD","팀별 해결안 작성","25분"],["POL","해결안 동료 투표","5분"],["QZG","핵심 개념 확인","10분"],["EXT","Exit Ticket","자동"]] },
+  "토론수업": { desc: "입장 변화를 데이터로 확인하는 구조화 토론", blocks: [["POL","사전 입장 조사","3분"],["BRD","찬반 논거 보드","20분"],["SGQ","반박 문항 출제·상호 풀이","12분"],["POL","사후 입장 조사","3분"],["EXT","Exit Ticket","자동"]] },
+  "TBL": { desc: "개인(iRAT)·팀(tRAT) 준비도 확인 후 적용 (팀기반학습)", blocks: [["QZS","iRAT 개인 준비도 확인","수업 전"],["QZG","tRAT 팀 준비도 확인","15분"],["BRD","적용 과제 팀 활동","30분"],["EXT","Exit Ticket","자동"]] },
+  "강의 중심": { desc: "신호등 상시 가동 + 중간 점검으로 페이스 조절", blocks: [["POL","도입 질문","3분"],["QZG","중간 점검 퀴즈","10분"],["EXT","Exit Ticket","자동"]] },
+};
+const tplBlocks = name => FLOW_TEMPLATES[name].blocks.map(([type, title, dur]) => ({ id: uid(), type, title, dur }));
 
 /* ---------- 내장 QR 렌더러 ---------- */
 function QRSvg({ text, size = 170 }) {
@@ -2356,6 +2366,7 @@ function App() {
   const [questionsQ, setQuestionsQ] = useState({});
   const [exitR, setExitR] = useState({});
   const [conf, setConf] = useState({ joinCode: "4A79K2", pin: "1234" });
+  const [flows, setFlows] = useState({});
   const [connected, setConnected] = useState(null);
   const [offset, setOffset] = useState(0);
   const serverNow = () => Date.now() + offset;
@@ -2369,6 +2380,7 @@ function App() {
       [R("questions"), s => setQuestionsQ(s.val() || {})],
       [R("exit"), s => setExitR(s.val() || {})],
       [R("config"), s => { const v = s.val(); if (v) setConf(c => ({ ...c, ...v })); }],
+      [R("flows"), s => setFlows(s.val() || {})],
       [db.ref(".info/connected"), s => setConnected(!!s.val())],
       [db.ref(".info/serverTimeOffset"), s => setOffset(s.val() || 0)],
     ];
@@ -2401,6 +2413,7 @@ function App() {
   const [qDraft, setQDraft] = useState("");
   const [exitForm, setExitForm] = useState({ scale: 0, concept: "", open: "" });
   const [newQ, setNewQ] = useState(null); // 문항 직접 추가 폼
+  const [editBlock, setEditBlock] = useState(null); // 플로우 블록 편집
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
   const notify = m => { setToast(m); setTimeout(() => setToast(null), 2600); };
   const askText = (title, desc, initial, placeholder, ok) => setDlg({ mode: "prompt", title, desc, value: initial || "", placeholder, ok });
@@ -2486,6 +2499,52 @@ function App() {
   };
   const exitList = Object.values(exitR || {});
 
+  /* ---------- 플로우 관리 (E-1 · E-2) ---------- */
+  const flowList = Object.entries(flows || {}).map(([id, f]) => ({ id, ...f, blocks: f.blocks || [] })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const activeFlow = flowList.find(f => f.id === conf.activeFlowId) || flowList[0] || { id: "", name: "플로우 없음", method: "-", blocks: [] };
+  const setActiveFlow = id => R("config/activeFlowId").set(id);
+  const newFlowFromTemplate = name => {
+    const id = uid();
+    R("flows/" + id).set({ name: name + " 플로우", method: name, blocks: tplBlocks(name), createdAt: serverNow() });
+    setActiveFlow(id); notify("'" + name + "' 템플릿으로 새 플로우를 만들었습니다.");
+  };
+  const newFlowEmpty = () => askText("새 플로우 만들기", "플로우 이름을 입력하세요.", "새 수업 플로우", "플로우 이름", v => {
+    if (!v.trim()) { notify("이름을 입력해 주세요."); return false; }
+    const id = uid();
+    R("flows/" + id).set({ name: v.trim(), method: "직접 설계", blocks: [], createdAt: serverNow() });
+    setActiveFlow(id);
+  });
+  const renameFlow = () => askText("플로우 이름 변경", null, activeFlow.name, "플로우 이름", v => {
+    if (!v.trim()) { notify("이름을 입력해 주세요."); return false; }
+    R("flows/" + activeFlow.id + "/name").set(v.trim());
+  });
+  const dupFlow = () => {
+    const id = uid();
+    R("flows/" + id).set({ name: activeFlow.name + " (복사)", method: activeFlow.method, blocks: activeFlow.blocks.map(b => ({ ...b, id: uid() })), createdAt: serverNow() });
+    setActiveFlow(id); notify("플로우가 복제되었습니다.");
+  };
+  const delFlow = () => {
+    if (flowList.length <= 1) return notify("플로우는 최소 1개가 필요합니다.");
+    askConfirm("플로우 삭제", "'" + activeFlow.name + "' 플로우를 삭제할까요? 되돌릴 수 없습니다.", () => {
+      const rest = flowList.filter(f => f.id !== activeFlow.id);
+      R("flows/" + activeFlow.id).remove();
+      setActiveFlow(rest[0].id);
+    });
+  };
+  const setBlocks = b => R("flows/" + activeFlow.id + "/blocks").set(b);
+  const blockAdd = type => setBlocks([...activeFlow.blocks, { id: uid(), type, title: ACT_TYPES[type], dur: "10분" }]);
+  const blockDel = id => setBlocks(activeFlow.blocks.filter(x => x.id !== id));
+  const blockMove = (i, dir) => {
+    const a = [...activeFlow.blocks]; const j = i + dir;
+    if (j < 0 || j >= a.length) return;
+    [a[i], a[j]] = [a[j], a[i]]; setBlocks(a);
+  };
+  const blockSave = () => {
+    if (!editBlock.title.trim()) return notify("활동 제목을 입력해 주세요.");
+    setBlocks(activeFlow.blocks.map(x => x.id === editBlock.id ? { ...x, title: editBlock.title.trim(), dur: editBlock.dur.trim() || "10분" } : x));
+    setEditBlock(null);
+  };
+
   /* ---------- 설정 ---------- */
   const changeCode = () => askText("참여 코드 변경", "영문/숫자 4~8자", conf.joinCode, "새 참여 코드", v => {
     if (!/^[A-Za-z0-9]{4,8}$/.test(v.trim())) { notify("영문/숫자 4~8자로 입력해 주세요."); return false; }
@@ -2525,7 +2584,7 @@ function App() {
   })();
 
   const TABS = isInstructor
-    ? [["home","홈","🏠"],["quiz","퀴즈","▶"],["signal","신호등","🚦"],["exit","Exit","⏻"],["analytics","분석","📊"]]
+    ? [["home","홈","🏠"],["flow","플로우","🧩"],["quiz","퀴즈","▶"],["signal","신호등","🚦"],["exit","Exit","⏻"],["analytics","분석","📊"]]
     : [["home","홈","🏠"],["quiz","퀴즈","▶"],["signal","신호등","🚦"],["exit","Exit","⏻"]];
 
   /* ============================ RENDER ============================ */
@@ -2565,7 +2624,7 @@ function App() {
           <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Card style={{ background: "#faf9f4" }}>
               <Label>수업 진행</Label>
-              <div style={{ fontSize: 12.5, color: "#55585f", marginBottom: 10 }}>참여 코드 <b style={{ fontFamily: "monospace", color: "#0E6B5B" }}>{conf.joinCode}</b> · 접속 학생 {playerCount}명 · Exit {exitList.length}건</div>
+              <div style={{ fontSize: 12.5, color: "#55585f", marginBottom: 10 }}>참여 코드 <b style={{ fontFamily: "monospace", color: "#0E6B5B" }}>{conf.joinCode}</b> · 접속 학생 {playerCount}명 · Exit {exitList.length}건 · 활성 플로우: <b>{activeFlow.name}</b></div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <Btn pri onClick={() => { setTab("quiz"); if (quiz.status === "idle") openLobby(); }}>▶ 퀴즈 세션 시작</Btn>
                 <Btn onClick={() => setTab("analytics")}>분석 보기</Btn>
@@ -2614,6 +2673,85 @@ function App() {
             </Card>
           </div>
         ))}
+
+        {/* ==================== FLOW ==================== */}
+        {tab === "flow" && isInstructor && (
+          <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Card>
+              <Label>내 플로우 ({flowList.length}) — 수업 유형별로 만들어 두고 골라 쓰세요</Label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {flowList.map(f => {
+                  const on = f.id === activeFlow.id;
+                  return (
+                    <button key={f.id} onClick={() => setActiveFlow(f.id)}
+                      style={{ display: "flex", alignItems: "center", gap: 8, border: "2px solid " + (on ? "#0E6B5B" : "#d8d6cc"), background: on ? "#e7f3ee" : "#fff", borderRadius: 9, padding: "9px 11px", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+                      <span style={{ fontWeight: 900, fontSize: 13 }}>{on ? "●" : "○"}</span>
+                      <span style={{ flex: 1, fontSize: 13, fontWeight: on ? 900 : 500 }}>{f.name}</span>
+                      <span style={{ fontSize: 10.5, background: "#faf9f4", border: "1px solid #d8d6cc", borderRadius: 20, padding: "2px 9px", color: "#55585f" }}>{f.method}</span>
+                      <span style={{ fontSize: 11, color: "#787b82" }}>{f.blocks.length}단계</span>
+                    </button>
+                  );
+                })}
+                {flowList.length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "8px 0" }}>아직 플로우가 없습니다 — 아래 템플릿으로 시작해 보세요.</div>}
+              </div>
+              <div style={{ borderTop: "1px dashed #d8d6cc", marginTop: 10, paddingTop: 10 }}>
+                <Label>새 플로우 만들기</Label>
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  <Btn sm onClick={newFlowEmpty}>+ 빈 플로우</Btn>
+                  {Object.keys(FLOW_TEMPLATES).map(t => <Btn sm key={t} onClick={() => newFlowFromTemplate(t)}>📋 {t}</Btn>)}
+                </div>
+              </div>
+            </Card>
+            {flowList.length > 0 && (
+              <Card>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+                  <div style={{ fontWeight: 900, fontSize: 14 }}>✏️ {activeFlow.name}</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <Btn sm onClick={renameFlow}>이름 변경</Btn>
+                    <Btn sm onClick={dupFlow}>복제</Btn>
+                    <Btn sm onClick={delFlow} style={{ color: "#b3402a" }}>삭제</Btn>
+                  </div>
+                </div>
+                {FLOW_TEMPLATES[activeFlow.method] && <div style={{ fontSize: 11, color: "#787b82", marginBottom: 10 }}>ⓘ {activeFlow.method}: {FLOW_TEMPLATES[activeFlow.method].desc}</div>}
+                <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                  {activeFlow.blocks.map((f, i) => (
+                    <div key={f.id} style={{ border: "1.5px solid #d8d6cc", borderRadius: 9, padding: "8px 10px", background: "#fff" }}>
+                      {editBlock?.id === f.id ? (
+                        <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <input value={editBlock.title} onChange={e => setEditBlock(s => ({ ...s, title: e.target.value }))} placeholder="활동 제목" className="inp" style={{ flex: 2 }} />
+                            <input value={editBlock.dur} onChange={e => setEditBlock(s => ({ ...s, dur: e.target.value }))} placeholder="시간 (예: 10분)" className="inp" style={{ flex: 1 }} />
+                          </div>
+                          <div style={{ display: "flex", gap: 5 }}>
+                            <Btn pri sm onClick={blockSave}>저장</Btn>
+                            <Btn sm onClick={() => setEditBlock(null)}>취소</Btn>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontFamily: "monospace", fontSize: 10, color: "#0E6B5B", fontWeight: 700, minWidth: 30 }}>{f.type}</span>
+                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span></span>
+                          <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
+                          <button onClick={() => blockMove(i, -1)} disabled={i === 0} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === 0 ? .25 : 1 }} aria-label="위로">↑</button>
+                          <button onClick={() => blockMove(i, 1)} disabled={i === activeFlow.blocks.length - 1} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === activeFlow.blocks.length - 1 ? .25 : 1 }} aria-label="아래로">↓</button>
+                          <button onClick={() => blockDel(f.id)} style={{ border: "none", background: "none", color: "#b3402a", fontSize: 13, cursor: "pointer" }} aria-label="삭제">✕</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {activeFlow.blocks.length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "10px 0" }}>아래에서 활동을 추가해 플로우를 구성하세요.</div>}
+                </div>
+                <div style={{ borderTop: "1px dashed #d8d6cc", marginTop: 10, paddingTop: 10 }}>
+                  <Label>활동 추가</Label>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {Object.entries(ACT_TYPES).map(([k, v]) => <Btn key={k} sm onClick={() => blockAdd(k)}>+ {v}</Btn>)}
+                  </div>
+                </div>
+              </Card>
+            )}
+            <div style={{ fontSize: 11, color: "#787b82", padding: "0 4px" }}>ⓘ 신호등(SIG)은 별도 배치 없이도 세션 전체에 상시 가동됩니다. 플로우는 실시간으로 저장·공유됩니다.</div>
+          </div>
+        )}
 
         {/* ==================== QUIZ ==================== */}
         {tab === "quiz" && (
