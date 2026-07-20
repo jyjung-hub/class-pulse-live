@@ -2295,7 +2295,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 1.1";
+const APP_VERSION = "LIVE 1.2";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■"];
@@ -2367,6 +2367,8 @@ function App() {
   const [exitR, setExitR] = useState({});
   const [conf, setConf] = useState({ joinCode: "4A79K2", pin: "1234" });
   const [flows, setFlows] = useState({});
+  const [questionSets, setQuestionSets] = useState({});
+  const [session, setSession] = useState(null); // 플로우 러너 {flowId, step}
   const [connected, setConnected] = useState(null);
   const [offset, setOffset] = useState(0);
   const serverNow = () => Date.now() + offset;
@@ -2381,6 +2383,8 @@ function App() {
       [R("exit"), s => setExitR(s.val() || {})],
       [R("config"), s => { const v = s.val(); if (v) setConf(c => ({ ...c, ...v })); }],
       [R("flows"), s => setFlows(s.val() || {})],
+      [R("questionSets"), s => setQuestionSets(s.val() || {})],
+      [R("session"), s => setSession(s.val())],
       [db.ref(".info/connected"), s => setConnected(!!s.val())],
       [db.ref(".info/serverTimeOffset"), s => setOffset(s.val() || 0)],
     ];
@@ -2429,9 +2433,31 @@ function App() {
   const shareUrl = location.href.split("#")[0];
 
   /* ---------- 퀴즈 동작 ---------- */
-  const openLobby = async () => {
+  /* ---------- 문항 세트 ---------- */
+  const setsList = Object.entries(questionSets || {}).map(([id, s]) => ({ id, ...s, questions: s.questions || [] })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const currentSetId = conf.currentSetId && questionSets?.[conf.currentSetId] ? conf.currentSetId : (setsList[0] ? setsList[0].id : null);
+  const curSet = currentSetId ? { id: currentSetId, ...questionSets[currentSetId], questions: questionSets[currentSetId].questions || [] } : null;
+  const bootRef = useRef(false);
+  useEffect(() => { // 최초 1회: 기본 문항 세트 생성
+    if (isInstructor && connected && setsList.length === 0 && !bootRef.current) {
+      bootRef.current = true;
+      const id = uid();
+      R("questionSets/" + id).set({ name: "기본 문항 세트", questions: SEED_QUESTIONS, createdAt: serverNow() });
+      R("config/currentSetId").set(id);
+    }
+  }, [isInstructor, connected, questionSets]);
+  const newSet = () => askText("새 문항 세트", "예: 7주차 사전학습, 중간 점검", "", "세트 이름", v => {
+    if (!v.trim()) { notify("이름을 입력해 주세요."); return false; }
+    const id = uid();
+    R("questionSets/" + id).set({ name: v.trim(), questions: [], createdAt: serverNow() });
+    R("config/currentSetId").set(id);
+  });
+
+  const openLobby = async (setId) => {
+    const src = questionSets?.[setId] || curSet;
+    const qs = (src && src.questions && src.questions.length) ? src.questions : SEED_QUESTIONS;
     await Promise.all([R("players").remove(), R("answers").remove()]);
-    await R("quiz").update({ status: "lobby", qIndex: 0 });
+    await R("quiz").update({ status: "lobby", qIndex: 0, questions: qs, setName: src ? src.name : "" });
   };
   const tryJoin = async () => {
     if (codeDraft.trim().toUpperCase() !== (conf.joinCode || "").toUpperCase())
@@ -2467,12 +2493,13 @@ function App() {
   };
   const addQuestion = () => {
     const q = newQ;
+    if (!curSet) return notify("먼저 문항 세트를 만들어 주세요.");
     if (!q.q.trim() || q.choices.some(c => !c.trim())) return notify("문항과 4개 보기를 모두 입력해 주세요.");
-    R("quiz/questions").set([...(quiz.questions||[]), { q: q.q.trim(), choices: q.choices.map(c=>c.trim()), answer: q.answer, expl: q.expl.trim() || "-" }]);
-    setNewQ(null); notify("문항이 추가되었습니다.");
+    R("questionSets/" + curSet.id + "/questions").set([...curSet.questions, { q: q.q.trim(), choices: q.choices.map(c=>c.trim()), answer: q.answer, expl: q.expl.trim() || "-" }]);
+    setNewQ(null); notify("'" + curSet.name + "' 세트에 문항이 추가되었습니다.");
   };
   const delQuestion = i => askConfirm("문항 삭제", "Q"+(i+1)+" 문항을 삭제할까요?", () =>
-    R("quiz/questions").set(quiz.questions.filter((_, j) => j !== i)));
+    R("questionSets/" + curSet.id + "/questions").set(curSet.questions.filter((_, j) => j !== i)));
 
   /* ---------- 신호등·질문 ---------- */
   const setSignal = v => R("signals/" + me.id).set({ v, ts: serverNow(), nick: me.nick });
@@ -2532,7 +2559,7 @@ function App() {
     });
   };
   const setBlocks = b => R("flows/" + activeFlow.id + "/blocks").set(b);
-  const blockAdd = type => setBlocks([...activeFlow.blocks, { id: uid(), type, title: ACT_TYPES[type], dur: "10분" }]);
+  const blockAdd = type => setBlocks([...activeFlow.blocks, { id: uid(), type, title: ACT_TYPES[type], dur: "10분", ...((type === "QZG" || type === "QZS") && currentSetId ? { setId: currentSetId } : {}) }]);
   const blockDel = id => setBlocks(activeFlow.blocks.filter(x => x.id !== id));
   const blockMove = (i, dir) => {
     const a = [...activeFlow.blocks]; const j = i + dir;
@@ -2541,9 +2568,25 @@ function App() {
   };
   const blockSave = () => {
     if (!editBlock.title.trim()) return notify("활동 제목을 입력해 주세요.");
-    setBlocks(activeFlow.blocks.map(x => x.id === editBlock.id ? { ...x, title: editBlock.title.trim(), dur: editBlock.dur.trim() || "10분" } : x));
+    setBlocks(activeFlow.blocks.map(x => x.id === editBlock.id ? { ...x, title: editBlock.title.trim(), dur: editBlock.dur.trim() || "10분", ...(editBlock.setId !== undefined ? { setId: editBlock.setId } : {}) } : x));
     setEditBlock(null);
   };
+
+  /* ---------- 플로우 러너 ---------- */
+  const runFlow = session && flows?.[session.flowId] ? { id: session.flowId, ...flows[session.flowId], blocks: flows[session.flowId].blocks || [] } : null;
+  const runBlock = runFlow ? runFlow.blocks[session.step] : null;
+  const startFlowSession = () => {
+    if (activeFlow.blocks.length === 0) return notify("플로우에 활동이 없습니다. 먼저 활동을 추가해 주세요.");
+    R("session").set({ flowId: activeFlow.id, step: 0, startedAt: serverNow() });
+    notify("'" + activeFlow.name + "' 플로우로 수업을 시작합니다.");
+  };
+  const nextStep = () => {
+    if (!runFlow) return;
+    if (session.step + 1 >= runFlow.blocks.length) return endFlowSession();
+    R("session/step").set(session.step + 1);
+  };
+  const endFlowSession = () => askConfirm("수업 종료", "플로우 진행을 종료할까요?", () => { R("session").remove(); endQuiz(); });
+  const openStepQuiz = () => { if (runBlock) { openLobby(runBlock.setId); setTab("quiz"); } };
 
   /* ---------- 설정 ---------- */
   const changeCode = () => askText("참여 코드 변경", "영문/숫자 4~8자", conf.joinCode, "새 참여 코드", v => {
@@ -2616,6 +2659,34 @@ function App() {
         {connected === false && (
           <div className="fade" style={{ background: "#FBEAE5", border: "1.5px solid #b3402a", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#7c2d1c", marginBottom: 12 }}>
             <b>🔴 서버와 연결이 끊겼습니다.</b> 네트워크를 확인해 주세요. 연결되면 자동 복구됩니다.
+          </div>
+        )}
+
+        {/* ==================== 플로우 진행 배너 ==================== */}
+        {runFlow && runBlock && (
+          <div className="fade" style={{ background: "#0E6B5B", color: "#fff", borderRadius: 12, padding: "11px 14px", marginBottom: 12 }}>
+            <div style={{ fontSize: 10.5, opacity: .8, fontWeight: 700, letterSpacing: ".06em" }}>수업 진행 중 · {runFlow.name} · 단계 {session.step + 1}/{runFlow.blocks.length}</div>
+            <div style={{ fontSize: 14.5, fontWeight: 900, margin: "3px 0 8px" }}>
+              <span style={{ fontFamily: "monospace", fontSize: 11, background: "rgba(255,255,255,.18)", borderRadius: 4, padding: "1px 6px", marginRight: 6 }}>{runBlock.type}</span>
+              {runBlock.title} <span style={{ fontSize: 11.5, opacity: .75 }}>· {runBlock.dur}</span>
+              {(runBlock.type === "QZG" || runBlock.type === "QZS") && runBlock.setId && questionSets?.[runBlock.setId] && <span style={{ fontSize: 11, opacity: .75 }}> · 🔗 {questionSets[runBlock.setId].name}</span>}
+            </div>
+            {isInstructor ? (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {(runBlock.type === "QZG" || runBlock.type === "QZS") && <Btn sm onClick={openStepQuiz} style={{ borderColor: "#fff" }}>▶ 이 단계 퀴즈 열기</Btn>}
+                {runBlock.type === "EXT" && <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>Exit 결과 보기</Btn>}
+                <Btn sm onClick={nextStep} style={{ borderColor: "#fff" }}>{session.step + 1 >= runFlow.blocks.length ? "수업 종료" : "다음 단계 →"}</Btn>
+                <Btn sm onClick={endFlowSession} style={{ borderColor: "#fff", marginLeft: "auto" }}>종료</Btn>
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                {(runBlock.type === "QZG" || runBlock.type === "QZS") && quiz.status !== "idle"
+                  ? <Btn sm onClick={() => setTab("quiz")} style={{ borderColor: "#fff" }}>▶ 퀴즈 참여하기</Btn>
+                  : runBlock.type === "EXT"
+                  ? <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>⏻ Exit Ticket 제출하기</Btn>
+                  : <span style={{ fontSize: 12, opacity: .85 }}>교수님 안내에 따라 활동을 진행해 주세요 (이해도는 🚦 신호등으로!)</span>}
+              </div>
+            )}
           </div>
         )}
 
@@ -2706,7 +2777,8 @@ function App() {
               <Card>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
                   <div style={{ fontWeight: 900, fontSize: 14 }}>✏️ {activeFlow.name}</div>
-                  <div style={{ display: "flex", gap: 4 }}>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {!runFlow && <Btn pri sm onClick={startFlowSession}>▶ 이 플로우로 수업 시작</Btn>}
                     <Btn sm onClick={renameFlow}>이름 변경</Btn>
                     <Btn sm onClick={dupFlow}>복제</Btn>
                     <Btn sm onClick={delFlow} style={{ color: "#b3402a" }}>삭제</Btn>
@@ -2722,6 +2794,15 @@ function App() {
                             <input value={editBlock.title} onChange={e => setEditBlock(s => ({ ...s, title: e.target.value }))} placeholder="활동 제목" className="inp" style={{ flex: 2 }} />
                             <input value={editBlock.dur} onChange={e => setEditBlock(s => ({ ...s, dur: e.target.value }))} placeholder="시간 (예: 10분)" className="inp" style={{ flex: 1 }} />
                           </div>
+                          {(activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "QZG" || activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "QZS") && (
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <span style={{ fontSize: 11.5, color: "#787b82", whiteSpace: "nowrap" }}>🔗 연동 문항 세트</span>
+                              <select value={editBlock.setId || ""} onChange={e => setEditBlock(s => ({ ...s, setId: e.target.value }))} className="inp" style={{ flex: 1 }}>
+                                <option value="">(선택 안 함 — 현재 세트 사용)</option>
+                                {setsList.map(s => <option key={s.id} value={s.id}>{s.name} ({s.questions.length}문항)</option>)}
+                              </select>
+                            </div>
+                          )}
                           <div style={{ display: "flex", gap: 5 }}>
                             <Btn pri sm onClick={blockSave}>저장</Btn>
                             <Btn sm onClick={() => setEditBlock(null)}>취소</Btn>
@@ -2730,8 +2811,8 @@ function App() {
                       ) : (
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: "#0E6B5B", fontWeight: 700, minWidth: 30 }}>{f.type}</span>
-                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span></span>
-                          <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
+                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span>{f.setId && questionSets?.[f.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[f.setId].name}</span>}</span>
+                          <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur, setId: f.setId || "" })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
                           <button onClick={() => blockMove(i, -1)} disabled={i === 0} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === 0 ? .25 : 1 }} aria-label="위로">↑</button>
                           <button onClick={() => blockMove(i, 1)} disabled={i === activeFlow.blocks.length - 1} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === activeFlow.blocks.length - 1 ? .25 : 1 }} aria-label="아래로">↓</button>
                           <button onClick={() => blockDel(f.id)} style={{ border: "none", background: "none", color: "#b3402a", fontSize: 13, cursor: "pointer" }} aria-label="삭제">✕</button>
@@ -2759,15 +2840,21 @@ function App() {
             {isInstructor ? (<React.Fragment>
               {quiz.status === "idle" && (
                 <Card>
-                  <Label>퀴즈 준비 · 문제은행 {(quiz.questions||[]).length}문항</Label>
-                  {(quiz.questions||[]).map((q, i) => (
+                  <Label>문항 세트 관리</Label>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <select value={currentSetId || ""} onChange={e => R("config/currentSetId").set(e.target.value)} className="inp" style={{ flex: 1, minWidth: 160 }}>
+                      {setsList.map(s => <option key={s.id} value={s.id}>{s.name} ({s.questions.length}문항)</option>)}
+                    </select>
+                    <Btn sm onClick={newSet}>+ 새 세트</Btn>
+                  </div>
+                  {(curSet ? curSet.questions : []).map((q, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, padding: "6px 0", borderBottom: "1px dashed #eceade" }}>
                       <span style={{ flex: 1 }}><b>Q{i+1}.</b> {q.q} <span style={{ color: "#0E6B5B", fontSize: 11 }}>정답: {SHAPES[q.answer]}</span></span>
                       <button onClick={() => delQuestion(i)} style={{ border: "none", background: "none", color: "#b3402a", cursor: "pointer" }}>✕</button>
                     </div>
                   ))}
                   <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
-                    <Btn pri onClick={openLobby}>대기실 열기</Btn>
+                    <Btn pri disabled={!curSet || curSet.questions.length === 0} onClick={() => openLobby(currentSetId)}>대기실 열기 ({curSet ? curSet.questions.length : 0}문항)</Btn>
                     <Btn onClick={() => setNewQ({ q: "", choices: ["","","",""], answer: 0, expl: "" })}>+ 문항 직접 추가</Btn>
                   </div>
                   {newQ && (
@@ -2789,7 +2876,7 @@ function App() {
               )}
               {quiz.status === "lobby" && (
                 <Card style={{ textAlign: "center" }}>
-                  <Label>대기실</Label>
+                  <Label>대기실{quiz.setName ? " · " + quiz.setName : ""}</Label>
                   <div style={{ fontSize: 11, color: "#787b82", marginTop: 6 }}>참여 코드</div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, margin: "2px 0 10px" }}>
                     <span style={{ fontSize: 30, fontWeight: 900, fontFamily: "monospace", letterSpacing: ".14em" }}>{conf.joinCode}</span>
