@@ -2302,10 +2302,10 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.8";
+const APP_VERSION = "LIVE 2.9";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
-const SHAPES = ["▲","◆","●","■"];
+const SHAPES = ["▲","◆","●","■","★"];
 const uid = () => Math.random().toString(36).slice(2, 10);
 const configured = !Object.values(FIREBASE_CONFIG).some(v => String(v).includes("여기에"));
 
@@ -2317,6 +2317,14 @@ const SEED_QUESTIONS = [
 
 const ACT_TYPES = {BRD:"협업 보드",QZG:"게임 퀴즈",QZS:"자기속도 퀴즈",POL:"즉석 투표",EXT:"Exit Ticket",SIG:"신호등",SGQ:"학생 출제",CUS:"사용자 활동"};
 const LINKABLE = ["CUS", "BRD", "SGQ"]; // 외부 도구 링크·안내문 지원 활동
+const QTYPES = { MC: "선다형", TF: "진위형", SA: "단답형", ES: "서술형" };
+const normSA = s => String(s || "").trim().toLowerCase().replace(/\s+/g, "");
+const isCorrect = (q, a) => {
+  if (!q || !a) return false;
+  if (q.type === "SA") return (q.answers || []).some(x => normSA(x) === normSA(a.text));
+  if (q.type === "ES") return a.es === true; // 교수자(또는 AI 초안 승인) 인정 여부
+  return a.choice === q.answer; // 선다형·진위형
+};
 const FLOW_TEMPLATES = {
   "플립러닝": { desc: "사전학습 데이터로 본 수업을 조정하는 구조 (JiTT)", blocks: [["QZS","사전학습 확인 퀴즈","수업 전"],["POL","사전학습 난이도 체감","5분",{q:"사전학습, 해보니 어땠나요?",choices:["쉬웠다","보통이었다","어려웠다","하지 못했다"]}],["BRD","팀 활동·사례 분석","20분"],["QZG","정리 퀴즈","15분"],["EXT","Exit Ticket","자동"]] },
   "PBL": { desc: "실제적 문제 중심의 팀 탐구 (문제기반학습)", blocks: [["BRD","문제 제시·쟁점 브레인스토밍","10분"],["BRD","팀별 해결안 작성","25분"],["POL","해결안 동료 투표","5분",{q:"가장 설득력 있는 해결안은?",choices:["1팀","2팀","3팀","4팀"]}],["QZG","핵심 개념 확인","10분"],["EXT","Exit Ticket","자동"]] },
@@ -2470,8 +2478,10 @@ function App() {
   const [editBlock, setEditBlock] = useState(null); // 플로우 블록 편집
   const [pollDraft, setPollDraft] = useState(null); // 투표 만들기 폼
   const [anaTab, setAnaTab] = useState("week"); // 분석 섹션
+  const [saDraft, setSaDraft] = useState(""); // 단답·서술 입력
   const [myReport, setMyReport] = useState(null); // 학생 내 리포트
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
+  useEffect(() => { setSaDraft(""); }, [quiz.qIndex, quiz.status]);
   const notify = m => { setToast(m); setTimeout(() => setToast(null), 2600); };
   const copyText = async t => {
     try { await navigator.clipboard.writeText(t); notify("복사되었습니다 — Claude 대화창에 붙여넣어 분석을 요청하세요."); }
@@ -2567,6 +2577,25 @@ function App() {
   };
   const nextQ = () => quiz.qIndex + 1 < quiz.questions.length ? startQuestion(quiz.qIndex + 1) : finishQuiz();
   const endQuiz = () => RW("quiz").update({ status: "idle" });
+  const submitText = async text => {
+    if (quiz.status !== "question" || myAnswer !== undefined || secsLeft <= 0) return;
+    if (!String(text || "").trim()) return notify("답안을 입력해 주세요.");
+    await RW("answers/" + quiz.qIndex + "/" + me.id).set({ text: String(text).trim(), ts: serverNow() });
+    await RW("players/" + me.id).set(me.nick);
+  };
+  const gradeES = (pid, ok) => RW("answers/" + quiz.qIndex + "/" + pid + "/es").set(ok); // 서술형 인정/미인정 (교수자 확정)
+  const addAccepted = t => { // 단답형: 이 답도 정답 처리 (즉시 재채점)
+    if (!curQ || curQ.type !== "SA") return;
+    RW("quiz/questions/" + quiz.qIndex + "/answers").set([...(curQ.answers || []), t]);
+    notify("'" + t + "' 을(를) 정답으로 추가했습니다 — 즉시 재채점됩니다.");
+  };
+  const buildESGradePrompt = () => {
+    const resp = Object.entries(answers?.[quiz.qIndex] || {}).map(([pid, a]) => "- [" + ((players || {})[pid] || pid) + "] " + (a.text || ""));
+    return "당신은 대학 교육 전문가입니다. 아래 서술형 문항의 학생 응답을 채점 기준(루브릭)에 따라 평가해 주세요.\n\n[문항] " + (curQ ? curQ.q : "") +
+      "\n[채점 기준] " + ((curQ && curQ.rubric) || "핵심 개념의 정확한 이해와 논리적 설명") +
+      "\n\n[학생 응답]\n" + (resp.join("\n") || "- 없음") +
+      "\n\n요청: 각 학생별로 ① 인정/미인정 판정 ② 한 줄 근거 ③ 공통 오개념 요약을 표로 정리해 주세요. 이 결과는 초안이며 최종 확정은 교수자가 합니다.";
+  };
   const submitAnswer = async choice => {
     if (quiz.status !== "question" || myAnswer !== undefined || secsLeft <= 0) return;
     await RW("answers/" + quiz.qIndex + "/" + me.id).set({ choice, ts: serverNow() });
@@ -2577,7 +2606,7 @@ function App() {
     Object.entries(players).forEach(([id, nick]) => { sc[id] = { nick, correct: 0 }; });
     Object.entries(answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([id, a]) => {
       if (!sc[id]) sc[id] = { nick: "?", correct: 0 };
-      if (a.choice === quiz.questions[qi]?.answer) sc[id].correct++;
+      if (isCorrect(quiz.questions[qi], a)) sc[id].correct++;
     }));
     return Object.values(sc).sort((a, b) => b.correct - a.correct);
   };
@@ -2590,9 +2619,23 @@ function App() {
   const addQuestion = () => {
     const q = newQ;
     if (!curSet) return notify("먼저 문항 세트를 만들어 주세요.");
-    if (!q.q.trim() || q.choices.some(c => !c.trim())) return notify("문항과 4개 보기를 모두 입력해 주세요.");
-    R("questionSets/" + curSet.id + "/questions").set([...curSet.questions, { q: q.q.trim(), choices: q.choices.map(c=>c.trim()), answer: q.answer, expl: q.expl.trim() || "-" }]);
-    setNewQ(null); notify("'" + curSet.name + "' 세트에 문항이 추가되었습니다.");
+    if (!q.q.trim()) return notify("문항 내용을 입력해 주세요.");
+    let obj = null;
+    if (q.type === "MC") {
+      const cs = q.choices.map(c => c.trim());
+      if (cs.length < 2 || cs.some(c => !c)) return notify("보기를 모두 입력해 주세요 (2~5개).");
+      obj = { type: "MC", q: q.q.trim(), choices: cs, answer: Math.min(q.answer, cs.length - 1), expl: q.expl.trim() || "-" };
+    } else if (q.type === "TF") {
+      obj = { type: "TF", q: q.q.trim(), choices: ["⭕ 맞다", "❌ 아니다"], answer: q.answer, expl: q.expl.trim() || "-" };
+    } else if (q.type === "SA") {
+      const ans = q.accepted.split(",").map(x => x.trim()).filter(Boolean);
+      if (!ans.length) return notify("인정 정답을 1개 이상 입력해 주세요.");
+      obj = { type: "SA", q: q.q.trim(), answers: ans, expl: q.expl.trim() || "-" };
+    } else {
+      obj = { type: "ES", q: q.q.trim(), rubric: q.rubric.trim(), expl: q.expl.trim() || "-" };
+    }
+    R("questionSets/" + curSet.id + "/questions").set([...curSet.questions, obj]);
+    setNewQ(null); notify("'" + curSet.name + "' 세트에 " + QTYPES[q.type] + " 문항이 추가되었습니다.");
   };
   const delQuestion = i => askConfirm("문항 삭제", "Q"+(i+1)+" 문항을 삭제할까요?", () =>
     R("questionSets/" + curSet.id + "/questions").set(curSet.questions.filter((_, j) => j !== i)));
@@ -2735,7 +2778,7 @@ function App() {
   const weekAcc = {}; // uid -> {name, ans, cor}
   histList0.forEach(h => Object.entries(h.answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
     if (!weekAcc[pid]) weekAcc[pid] = { name: (h.players || {})[pid] || pid, ans: 0, cor: 0 };
-    weekAcc[pid].ans++; if (a.choice === ((h.questions || [])[qi] || {}).answer) weekAcc[pid].cor++;
+    weekAcc[pid].ans++; if (isCorrect((h.questions || [])[qi], a)) weekAcc[pid].cor++;
   })));
   const weekPpl = (() => {
     const s = new Set(Object.keys(weekAcc));
@@ -2796,7 +2839,7 @@ function App() {
       const hist = d.quizHistory || {};
       let t = 0, c = 0; const ppl = new Set();
       Object.values(hist).forEach(h => Object.entries(h.answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
-        ppl.add(pid); t++; if (a.choice === ((h.questions || [])[qi] || {}).answer) c++;
+        ppl.add(pid); t++; if (isCorrect((h.questions || [])[qi], a)) c++;
       })));
       Object.keys(d.exit || {}).forEach(p => ppl.add(p));
       const ex = Object.values(d.exit || {});
@@ -2830,7 +2873,7 @@ function App() {
         const perQ = {};
         Object.entries(h.answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
           if (!perQ[pid]) perQ[pid] = { a: 0, c: 0, name: (h.players || {})[pid] || pid };
-          perQ[pid].a++; if (a.choice === ((h.questions || [])[qi] || {}).answer) perQ[pid].c++;
+          perQ[pid].a++; if (isCorrect((h.questions || [])[qi], a)) perQ[pid].c++;
         }));
         Object.entries(perQ).forEach(([pid, v]) => { seen[pid] = { name: v.name, acc: Math.round(v.c / v.a * 100) }; });
       });
@@ -2861,7 +2904,7 @@ function App() {
     histList0.forEach(h => (h.questions || []).forEach((q, qi) => {
       const m = (h.answers || {})[qi] || {}; const n = Object.keys(m).length;
       if (!n) return;
-      const c = Object.values(m).filter(x => x.choice === q.answer).length;
+      const c = Object.values(m).filter(x => isCorrect(q, x)).length;
       const p = Math.round(c / n * 100);
       if (p < 60) lowQ.push('"' + q.q + '" (정답률 ' + p + '%)');
     }));
@@ -2936,7 +2979,7 @@ function App() {
         const cells = [];
         HQ.forEach(h => (h.questions || []).forEach((q, qi) => {
           const a = ((h.answers || {})[qi] || {})[pid];
-          const v = a === undefined ? "-" : a.choice === q.answer ? "O" : "X";
+          const v = a === undefined ? "-" : isCorrect(q, a) ? "O" : "X";
           if (v === "O") sum++;
           cells.push(v);
         }));
@@ -2953,7 +2996,7 @@ function App() {
       let cc1 = 1, wT = 0, wC = 0;
       HQ.forEach(h => (h.questions || []).forEach((q, qi) => {
         const m = (h.answers || {})[qi] || {}; const n = Object.keys(m).length;
-        const c = Object.values(m).filter(a => a.choice === q.answer).length;
+        const c = Object.values(m).filter(a => isCorrect(q, a)).length;
         wT += n; wC += c;
         const p = n ? Math.round(c / n * 100) : 0;
         if (p < 50) lowCols1.push(cc1);
@@ -3086,14 +3129,14 @@ function App() {
         let sum = 0;
         const perQuiz = G.map(g => {
           let c = 0;
-          Object.entries(g.answers).forEach(([qi, m]) => { const a = (m || {})[pid]; if (a && a.choice === (g.questions[qi] || {}).answer) c++; });
+          Object.entries(g.answers).forEach(([qi, m]) => { const a = (m || {})[pid]; if (a && isCorrect(g.questions[qi], a)) c++; });
           sum += c; return c;
         });
         return { pid, name, perQuiz, sum, pct: totalQ ? Math.round(sum / totalQ * 100) : 0 };
       }).sort((x, y) => y.sum - x.sum || x.name.localeCompare(y.name));
       stu.forEach((s, k) => { s.rank = k > 0 && s.sum === stu[k - 1].sum ? stu[k - 1].rank : k + 1; });
       let grandT = 0, grandC = 0;
-      G.forEach(g => Object.entries(g.answers).forEach(([qi, m]) => Object.values(m || {}).forEach(a => { grandT++; if (a.choice === (g.questions[qi] || {}).answer) grandC++; })));
+      G.forEach(g => Object.entries(g.answers).forEach(([qi, m]) => Object.values(m || {}).forEach(a => { grandT++; if (isCorrect(g.questions[qi], a)) grandC++; })));
       const grandAvg = grandT ? Math.round(grandC / grandT * 100) : 0;
 
       /* ===== ① 표지·요약 ===== */
@@ -3105,7 +3148,7 @@ function App() {
       const listStart = cRows.length;
       G.forEach(g => {
         let t = 0, c = 0; const ppl = new Set();
-        Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => { ppl.add(pid); t++; if (a.choice === (g.questions[qi] || {}).answer) c++; }));
+        Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => { ppl.add(pid); t++; if (isCorrect(g.questions[qi], a)) c++; }));
         cRows.push([g.week + "주", g.setName, g.questions.length, ppl.size, t ? Math.round(c / t * 100) : 0]);
       });
       const wsC = XLSX.utils.aoa_to_sheet(cRows);
@@ -3136,7 +3179,7 @@ function App() {
         const row = [s.name]; let cc = 1;
         G.forEach(g => g.questions.forEach((q, qi) => {
           const a = (g.answers[qi] || {})[s.pid];
-          const v = a === undefined ? "-" : a.choice === q.answer ? "O" : "X";
+          const v = a === undefined ? "-" : isCorrect(q, a) ? "O" : "X";
           row.push(v); oxPos.push([ri + 2, cc++, v]);
         }));
         row.push(s.sum, s.pct, s.rank, GRADE(s.pct), BAR(s.pct));
@@ -3146,7 +3189,7 @@ function App() {
       let cc2 = 1;
       G.forEach(g => g.questions.forEach((q, qi) => {
         const m = g.answers[qi] || {}; const n = Object.keys(m).length;
-        const c = Object.values(m).filter(a => a.choice === q.answer).length;
+        const c = Object.values(m).filter(a => isCorrect(q, a)).length;
         const p = n ? Math.round(c / n * 100) : 0;
         if (p < 50) lowCols.push(cc2);
         qAvgRow.push(p); cc2++;
@@ -3187,7 +3230,7 @@ function App() {
       G.forEach(g => {
         const totMap = {};
         Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
-          totMap[pid] = (totMap[pid] || 0) + (a.choice === (g.questions[qi] || {}).answer ? 1 : 0);
+          totMap[pid] = (totMap[pid] || 0) + (isCorrect(g.questions[qi], a) ? 1 : 0);
         }));
         const sortedIds = Object.keys(totMap).sort((x, y) => totMap[y] - totMap[x]);
         const half = Math.floor(sortedIds.length / 2);
@@ -3195,11 +3238,11 @@ function App() {
         const botS = new Set(sortedIds.slice(sortedIds.length - half));
         g.questions.forEach((q, qi) => {
           const m = g.answers[qi] || {}; const n = Object.keys(m).length;
-          const cor = Object.values(m).filter(a => a.choice === q.answer).length;
+          const cor = Object.values(m).filter(a => isCorrect(q, a)).length;
           const pct = n ? Math.round(cor / n * 100) : 0;
           let disc = "-";
           if (half >= 2) {
-            const pOf = set => { let t = 0, c = 0; Object.entries(m).forEach(([pid, a]) => { if (set.has(pid)) { t++; if (a.choice === q.answer) c++; } }); return t ? c / t : 0; };
+            const pOf = set => { let t = 0, c = 0; Object.entries(m).forEach(([pid, a]) => { if (set.has(pid)) { t++; if (isCorrect(q, a)) c++; } }); return t ? c / t : 0; };
             disc = Math.round((pOf(topS) - pOf(botS)) * 100) / 100;
           }
           const row = [g.week, g.setName, qi + 1, q.q, (q.choices || [])[q.answer] || "", n, pct, disc];
@@ -3211,7 +3254,7 @@ function App() {
           const r = qA.length;
           qStyles.push([r, 6, pct < 50 ? "low" : "center"]);
           if (disc !== "-" && disc < 0.2) qStyles.push([r, 7, "gB"]); else qStyles.push([r, 7, "center"]);
-          qStyles.push([r, 8 + q.answer, "correct"]);
+          if (typeof q.answer === "number") qStyles.push([r, 8 + q.answer, "correct"]);
           qA.push(row);
         });
       });
@@ -3226,7 +3269,7 @@ function App() {
       const sRows = [["주차", "퀴즈", "문항수", "응시인원", "참여율%", "평균 정답률%"]];
       G.forEach(g => {
         let t = 0, c = 0; const ppl = new Set();
-        Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => { ppl.add(pid); t++; if (a.choice === (g.questions[qi] || {}).answer) c++; }));
+        Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => { ppl.add(pid); t++; if (isCorrect(g.questions[qi], a)) c++; }));
         sRows.push([g.week, g.setName, g.questions.length, ppl.size, Math.round(ppl.size / maxPpl * 100), t ? Math.round(c / t * 100) : 0]);
       });
       sRows.push(["종합", "", "", "", "", grandAvg]);
@@ -3268,12 +3311,12 @@ function App() {
     Object.entries(players).forEach(([id, n]) => touch(id, n));
     Object.entries(answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([id, a]) => {
       touch(id, players[id] || "?"); users[id].quizAns++;
-      if (a.choice === quiz.questions[qi]?.answer) users[id].quizCorrect++;
+      if (isCorrect(quiz.questions[qi], a)) users[id].quizCorrect++;
     }));
     Object.entries(exitR || {}).forEach(([id, r]) => { touch(id, r.nick); users[id].exit = true; });
     const perQ = (quiz.questions || []).map((q, i) => {
       const m = answers?.[i] || {}; const n = Object.keys(m).length;
-      const c = Object.values(m).filter(a => a.choice === q.answer).length;
+      const c = Object.values(m).filter(a => isCorrect(q, a)).length;
       return { n, pct: n ? Math.round(c/n*100) : 0 };
     });
     return { users: Object.values(users), perQ };
@@ -3514,7 +3557,7 @@ function App() {
                       const d = weeks["w" + w] || {};
                       Object.values(d.quizHistory || {}).forEach(h => {
                         const qs = h.questions || []; let mine = 0, cnt = 0;
-                        Object.entries(h.answers || {}).forEach(([qi, m]) => { const x = (m || {})[me.id]; if (x !== undefined) { cnt++; if (x.choice === (qs[qi] || {}).answer) mine++; } });
+                        Object.entries(h.answers || {}).forEach(([qi, m]) => { const x = (m || {})[me.id]; if (x !== undefined) { cnt++; if (isCorrect(qs[qi], x)) mine++; } });
                         if (cnt > 0) { rows.push({ w, name: h.setName, mine, n: qs.length, graded: !!h.graded }); sum += mine; tot += qs.length; }
                       });
                       if ((d.exit || {})[me.id]) exitN++;
@@ -3685,26 +3728,59 @@ function App() {
                   </div>
                   {(curSet ? curSet.questions : []).map((q, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, padding: "6px 0", borderBottom: "1px dashed #eceade" }}>
-                      <span style={{ flex: 1 }}><b>Q{i+1}.</b> {q.q} <span style={{ color: "#0E6B5B", fontSize: 11 }}>정답: {SHAPES[q.answer]}</span></span>
+                      <span style={{ flex: 1 }}><b>Q{i+1}.</b> <span style={{ fontSize: 10, background: "#e7f3ee", color: "#085041", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>{QTYPES[q.type] || "선다형"}</span> {q.q} <span style={{ color: "#0E6B5B", fontSize: 11 }}>{q.type === "SA" ? "정답: " + (q.answers || []).join(" / ") : q.type === "ES" ? "서술 · 수동채점" : "정답: " + SHAPES[q.answer]}</span></span>
                       <button onClick={() => delQuestion(i)} style={{ border: "none", background: "none", color: "#b3402a", cursor: "pointer" }}>✕</button>
                     </div>
                   ))}
                   <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
                     <Btn pri disabled={!curSet || curSet.questions.length === 0} onClick={() => openLobby(currentSetId)}>대기실 열기 ({curSet ? curSet.questions.length : 0}문항)</Btn>
-                    <Btn onClick={() => setNewQ({ q: "", choices: ["","","",""], answer: 0, expl: "" })}>+ 문항 직접 추가</Btn>
+                    <Btn onClick={() => setNewQ({ type: "MC", q: "", choices: ["", "", "", ""], answer: 0, expl: "", accepted: "", rubric: "" })}>+ 문항 직접 추가</Btn>
                   </div>
                   {newQ && (
                     <div className="fade" style={{ border: "1.5px solid #d8d6cc", borderRadius: 10, padding: 12, marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {Object.entries(QTYPES).map(([k2, v]) => (
+                          <button key={k2} onClick={() => setNewQ(s => ({ ...s, type: k2, answer: 0 }))}
+                            style={{ flex: 1, padding: "6px 2px", borderRadius: 8, border: "1.5px solid " + (newQ.type === k2 ? "#0E6B5B" : "#d8d6cc"), background: newQ.type === k2 ? "#0E6B5B" : "#fff", color: newQ.type === k2 ? "#fff" : "#55585f", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{v}</button>
+                        ))}
+                      </div>
                       <input value={newQ.q} onChange={e => setNewQ(s => ({ ...s, q: e.target.value }))} placeholder="문항 내용" className="inp" />
-                      {newQ.choices.map((c, i) => (
-                        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <button onClick={() => setNewQ(s => ({ ...s, answer: i }))} title="정답으로 지정"
-                            style={{ width: 30, height: 30, borderRadius: 8, border: "1.5px solid #24272B", cursor: "pointer", fontWeight: 900, background: newQ.answer === i ? "#0E6B5B" : "#fff", color: newQ.answer === i ? "#fff" : "#24272B" }}>{SHAPES[i]}</button>
-                          <input value={c} onChange={e => setNewQ(s => ({ ...s, choices: s.choices.map((x, j) => j === i ? e.target.value : x) }))} placeholder={"보기 " + (i+1)} className="inp" style={{ flex: 1 }} />
+                      {newQ.type === "MC" && (<React.Fragment>
+                        {newQ.choices.map((c, i2) => (
+                          <div key={i2} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <button onClick={() => setNewQ(s => ({ ...s, answer: i2 }))} title="정답으로 지정"
+                              style={{ width: 30, height: 30, borderRadius: 8, border: "1.5px solid #24272B", cursor: "pointer", fontWeight: 900, background: newQ.answer === i2 ? "#0E6B5B" : "#fff", color: newQ.answer === i2 ? "#fff" : "#24272B" }}>{SHAPES[i2]}</button>
+                            <input value={c} onChange={e => setNewQ(s => ({ ...s, choices: s.choices.map((x, j2) => j2 === i2 ? e.target.value : x) }))} placeholder={"보기 " + (i2 + 1)} className="inp" style={{ flex: 1 }} />
+                            {newQ.choices.length > 2 && <button onClick={() => setNewQ(s => ({ ...s, choices: s.choices.filter((_, j2) => j2 !== i2), answer: Math.min(s.answer, s.choices.length - 2) }))} style={{ border: "none", background: "none", color: "#b3402a", cursor: "pointer" }}>✕</button>}
+                          </div>
+                        ))}
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          {newQ.choices.length < 5 && <Btn sm onClick={() => setNewQ(s => ({ ...s, choices: [...s.choices, ""] }))}>+ 보기 추가 (5지선다까지)</Btn>}
+                          <span style={{ fontSize: 10.5, color: "#787b82" }}>정답: {SHAPES[newQ.answer]}</span>
                         </div>
-                      ))}
+                      </React.Fragment>)}
+                      {newQ.type === "TF" && (
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <span style={{ fontSize: 12, color: "#55585f" }}>정답:</span>
+                          {["⭕ 맞다", "❌ 아니다"].map((t, i2) => (
+                            <button key={i2} onClick={() => setNewQ(s => ({ ...s, answer: i2 }))}
+                              style={{ flex: 1, padding: "10px 4px", borderRadius: 10, border: "2px solid " + (newQ.answer === i2 ? "#0E6B5B" : "#d8d6cc"), background: newQ.answer === i2 ? "#e7f3ee" : "#fff", fontSize: 13, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}>{t}</button>
+                          ))}
+                        </div>
+                      )}
+                      {newQ.type === "SA" && (
+                        <div>
+                          <input value={newQ.accepted} onChange={e => setNewQ(s => ({ ...s, accepted: e.target.value }))} placeholder="인정 정답 — 콤마로 여러 개 (예: 형성평가, 형성 평가)" className="inp" style={{ width: "100%", boxSizing: "border-box" }} />
+                          <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 3 }}>ⓘ 공백·대소문자는 자동 무시됩니다. 진행 중 [이 답도 정답 처리]로 즉시 추가·재채점할 수 있습니다.</div>
+                        </div>
+                      )}
+                      {newQ.type === "ES" && (
+                        <div>
+                          <textarea rows={2} value={newQ.rubric} onChange={e => setNewQ(s => ({ ...s, rubric: e.target.value }))} placeholder="채점 기준(루브릭) — AI 채점 프롬프트와 교수자 채점에 사용됩니다" className="inp" style={{ width: "100%", resize: "vertical", boxSizing: "border-box" }} />
+                          <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 3 }}>ⓘ 서술형은 자동 채점되지 않으며, 마감 후 응답별로 교수자가 인정 여부를 확정합니다(AI 초안 지원).</div>
+                        </div>
+                      )}
                       <input value={newQ.expl} onChange={e => setNewQ(s => ({ ...s, expl: e.target.value }))} placeholder="해설 (한 문장)" className="inp" />
-                      <div style={{ fontSize: 10.5, color: "#787b82" }}>ⓘ 도형 버튼을 눌러 정답을 지정하세요 (현재 정답: {SHAPES[newQ.answer]})</div>
                       <div style={{ display: "flex", gap: 6 }}><Btn pri sm onClick={addQuestion}>추가</Btn><Btn sm onClick={() => setNewQ(null)}>취소</Btn></div>
                     </div>
                   )}
@@ -3752,7 +3828,54 @@ function App() {
                     <span>문항 {quiz.qIndex+1}/{quiz.questions.length} · 응답 {answerCount}/{playerCount}</span>
                     <span style={{ fontFamily: "monospace", fontWeight: 900, fontSize: 15, color: quiz.status === "question" && secsLeft <= 5 ? "#b3402a" : "#24272B" }}>{quiz.status === "question" ? "⏱ " + secsLeft + "s" : "마감"}</span>
                   </div>
-                  <div style={{ fontSize: 16, fontWeight: 900, marginBottom: 12, lineHeight: 1.5 }}>{curQ.q}</div>
+                  <div style={{ fontSize: 16, fontWeight: 900, marginBottom: 12, lineHeight: 1.5 }}><span style={{ fontSize: 10.5, background: "#e7f3ee", color: "#085041", borderRadius: 4, padding: "2px 6px", fontWeight: 700, marginRight: 6, verticalAlign: "middle" }}>{QTYPES[curQ.type] || "선다형"}</span>{curQ.q}</div>
+                  {(curQ.type === "SA" || curQ.type === "ES") ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {curQ.type === "SA" && (() => {
+                        const groups = {};
+                        Object.values(answers?.[quiz.qIndex] || {}).forEach(a => { const t = (a.text || "").trim(); if (t) groups[t] = (groups[t] || 0) + 1; });
+                        const gl = Object.entries(groups).sort((x, y) => y[1] - x[1]);
+                        return (<React.Fragment>
+                          <div style={{ fontSize: 11, color: "#787b82" }}>인정 정답: <b style={{ color: "#0F6E56" }}>{(curQ.answers || []).join(" / ")}</b></div>
+                          {gl.map(([t, n], k) => {
+                            const ok = isCorrect(curQ, { text: t });
+                            return (
+                              <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, border: "1.5px solid " + (ok ? "#0E6B5B" : "#d8d6cc"), background: ok ? "#e7f3ee" : "#fff", borderRadius: 9, padding: "7px 10px", fontSize: 13 }}>
+                                <span style={{ flex: 1 }}>{ok ? "✓ " : ""}{t}</span>
+                                <span style={{ fontFamily: "monospace", fontSize: 11.5, color: "#787b82" }}>{n}명</span>
+                                {!ok && quiz.status === "reveal" && <Btn sm onClick={() => addAccepted(t)}>+ 정답 처리</Btn>}
+                              </div>
+                            );
+                          })}
+                          {gl.length === 0 && <div style={{ fontSize: 12, color: "#a9aca7", textAlign: "center", padding: "8px 0" }}>아직 응답이 없습니다.</div>}
+                        </React.Fragment>);
+                      })()}
+                      {curQ.type === "ES" && (<React.Fragment>
+                        {curQ.rubric && <div style={{ fontSize: 11, color: "#787b82" }}>채점 기준: {curQ.rubric}</div>}
+                        {Object.entries(answers?.[quiz.qIndex] || {}).map(([pid, a]) => (
+                          <div key={pid} style={{ border: "1.5px solid " + (a.es === true ? "#0E6B5B" : a.es === false ? "#b3402a" : "#d8d6cc"), background: a.es === true ? "#e7f3ee" : "#fff", borderRadius: 9, padding: "8px 10px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, color: "#787b82", marginBottom: 3 }}>
+                              <span>{(players || {})[pid] || pid}</span>
+                              {quiz.status === "reveal" && (
+                                <span style={{ display: "flex", gap: 4 }}>
+                                  <button onClick={() => gradeES(pid, true)} style={{ border: "1.5px solid #0E6B5B", background: a.es === true ? "#0E6B5B" : "#fff", color: a.es === true ? "#fff" : "#0E6B5B", borderRadius: 6, padding: "2px 8px", fontSize: 10.5, fontWeight: 700, cursor: "pointer" }}>✓ 인정</button>
+                                  <button onClick={() => gradeES(pid, false)} style={{ border: "1.5px solid #b3402a", background: a.es === false ? "#b3402a" : "#fff", color: a.es === false ? "#fff" : "#b3402a", borderRadius: 6, padding: "2px 8px", fontSize: 10.5, fontWeight: 700, cursor: "pointer" }}>✗</button>
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{a.text}</div>
+                          </div>
+                        ))}
+                        {Object.keys(answers?.[quiz.qIndex] || {}).length === 0 && <div style={{ fontSize: 12, color: "#a9aca7", textAlign: "center", padding: "8px 0" }}>아직 응답이 없습니다.</div>}
+                        {quiz.status === "reveal" && Object.keys(answers?.[quiz.qIndex] || {}).length > 0 && (
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                            <Btn sm onClick={() => copyText(buildESGradePrompt())}>🤖 AI 채점 프롬프트 복사</Btn>
+                            <span style={{ fontSize: 10.5, color: "#787b82" }}>AI 결과는 초안 — 위 ✓/✗ 버튼으로 교수자가 확정하세요. [다음 문항] 전에 채점을 마쳐야 집계됩니다.</span>
+                          </div>
+                        )}
+                      </React.Fragment>)}
+                    </div>
+                  ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {curQ.choices.map((c, i) => {
                       const d = dist(quiz.qIndex)[i]; const isAns = i === curQ.answer;
@@ -3766,6 +3889,7 @@ function App() {
                       );
                     })}
                   </div>
+                  )}
                   {quiz.status === "reveal" && <div style={{ fontSize: 12.5, color: "#55585f", background: "#faf9f4", borderRadius: 8, padding: "8px 10px", marginTop: 10 }}>💡 {curQ.expl}</div>}
                   <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
                     {quiz.status === "question" ? <Btn pri onClick={revealQ}>마감 · 정답 공개</Btn> : <Btn pri onClick={nextQ}>{quiz.qIndex+1 < quiz.questions.length ? "다음 문항 →" : "결과 보기"}</Btn>}
@@ -3830,6 +3954,20 @@ function App() {
                     <span style={{ fontFamily: "monospace", fontWeight: 900, fontSize: 15, color: secsLeft <= 5 ? "#b3402a" : "#24272B" }}>⏱ {secsLeft}s</span>
                   </div>
                   <div style={{ fontSize: 14.5, fontWeight: 700, background: "#faf9f4", borderRadius: 9, padding: "10px 12px", marginBottom: 12, lineHeight: 1.5 }}>{curQ.q}</div>
+                  {(curQ.type === "SA" || curQ.type === "ES") ? (
+                    <div>
+                      {myAnswer !== undefined ? (
+                        <div style={{ textAlign: "center", fontSize: 13, color: "#0E6B5B", fontWeight: 700, padding: "14px 0" }}>제출 완료 ✓<div style={{ fontSize: 11.5, color: "#787b82", fontWeight: 400, marginTop: 4 }}>내 답안: {myAnswer.text}</div></div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {curQ.type === "SA"
+                            ? <input value={saDraft} onChange={e => setSaDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && submitText(saDraft)} placeholder="정답을 입력하세요" className="inp" style={{ fontSize: 15, padding: 12 }} />
+                            : <textarea rows={4} value={saDraft} onChange={e => setSaDraft(e.target.value)} placeholder="자유롭게 서술하세요" className="inp" style={{ resize: "vertical", fontSize: 14 }} />}
+                          <Btn pri style={{ padding: "12px 0", fontSize: 15 }} onClick={() => submitText(saDraft)} disabled={secsLeft <= 0}>제출하기</Btn>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {curQ.choices.map((c, i) => (
                       <button key={i} onClick={() => submitAnswer(i)} disabled={myAnswer !== undefined || secsLeft <= 0}
@@ -3838,16 +3976,17 @@ function App() {
                       </button>
                     ))}
                   </div>
+                  )}
                   <div style={{ textAlign: "center", fontSize: 11.5, color: "#787b82", marginTop: 10 }}>
-                    {myAnswer !== undefined ? "응답 완료 — 결과를 기다려 주세요" : secsLeft <= 0 ? "시간 마감" : "보기를 선택하세요"}
+                    {myAnswer !== undefined ? "응답 완료 — 결과를 기다려 주세요" : secsLeft <= 0 ? "시간 마감" : (curQ.type === "SA" || curQ.type === "ES") ? "답안 작성 후 제출하세요" : "보기를 선택하세요"}
                   </div>
                 </Card>
               )}
               {quiz.status === "reveal" && curQ && (
                 <Card style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 30, marginBottom: 6 }}>{myAnswer?.choice === curQ.answer ? "⭕" : myAnswer !== undefined ? "❌" : "⏳"}</div>
-                  <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 6 }}>{myAnswer === undefined ? "미응답" : myAnswer.choice === curQ.answer ? "정답입니다!" : "아쉬워요"}</div>
-                  <div style={{ fontSize: 12.5, color: "#55585f" }}>정답: {SHAPES[curQ.answer]} {curQ.choices[curQ.answer]}</div>
+                  <div style={{ fontSize: 30, marginBottom: 6 }}>{curQ.type === "ES" && myAnswer !== undefined && myAnswer.es === undefined ? "📝" : isCorrect(curQ, myAnswer) ? "⭕" : myAnswer !== undefined ? "❌" : "⏳"}</div>
+                  <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 6 }}>{myAnswer === undefined ? "미응답" : curQ.type === "ES" ? (myAnswer.es === undefined ? "채점 대기 중" : myAnswer.es ? "인정되었습니다!" : "미인정") : isCorrect(curQ, myAnswer) ? "정답입니다!" : "아쉬워요"}</div>
+                  <div style={{ fontSize: 12.5, color: "#55585f" }}>{curQ.type === "SA" ? "인정 정답: " + (curQ.answers || []).join(" / ") : curQ.type === "ES" ? (curQ.rubric ? "채점 기준: " + curQ.rubric : "교수자 채점 문항입니다") : "정답: " + SHAPES[curQ.answer] + " " + (curQ.choices || [])[curQ.answer]}</div>
                   <div style={{ fontSize: 12, color: "#787b82", background: "#faf9f4", borderRadius: 8, padding: "8px 10px", marginTop: 8, textAlign: "left" }}>💡 {curQ.expl}</div>
                 </Card>
               )}
@@ -4186,7 +4325,7 @@ function App() {
                 <Label>문항별 정답률 (이번 주 완주 퀴즈)</Label>
                 {histList0.map(h => (h.questions || []).map((q, qi) => {
                   const m = (h.answers || {})[qi] || {}; const n = Object.keys(m).length;
-                  const c = Object.values(m).filter(x => x.choice === q.answer).length;
+                  const c = Object.values(m).filter(x => isCorrect(q, x)).length;
                   const p = n ? Math.round(c / n * 100) : 0;
                   return (
                     <div key={h.id + qi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12 }}>
