@@ -36,6 +36,31 @@ body{background:#EDECE5}
 </head>
 <body>
 <div id="root"></div>
+<div id="cp-err" style="display:none;position:fixed;inset:0;z-index:9999;background:#EDECE5;padding:24px;font-family:'Noto Sans KR',sans-serif;">
+  <div style="max-width:560px;margin:40px auto;background:#fff;border:2px solid #b3402a;border-radius:14px;padding:20px;">
+    <div style="font-size:16px;font-weight:900;color:#b3402a;margin-bottom:8px;">⚠ 앱 실행 중 오류가 발생했습니다</div>
+    <div id="cp-err-msg" style="font-size:12px;font-family:monospace;background:#faf9f4;border-radius:8px;padding:10px;word-break:break-all;line-height:1.6;margin-bottom:12px;"></div>
+    <div style="font-size:12px;color:#55585f;line-height:1.7;margin-bottom:12px;">아래 오류 내용을 캡처해서 알려주시면 바로 수정할 수 있습니다. 새로고침하면 대부분 이전 화면으로 복구됩니다.</div>
+    <button onclick="location.reload()" style="border:1.5px solid #0E6B5B;background:#0E6B5B;color:#fff;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">새로고침</button>
+  </div>
+</div>
+<script>
+(function () {
+  function show(msg) {
+    var box = document.getElementById("cp-err"), m = document.getElementById("cp-err-msg");
+    if (!box || box.style.display === "block") return;
+    m.textContent = msg;
+    box.style.display = "block";
+  }
+  window.addEventListener("error", function (e) {
+    show((e.message || "알 수 없는 오류") + (e.filename ? "\n(" + (e.lineno || "?") + "행)" : ""));
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e.reason;
+    show("비동기 오류: " + (r && r.message ? r.message : String(r)));
+  });
+})();
+</script>
 <script>
 /* === QR Code Generator (c) 2009 Kazuhiko Arase, MIT License — https://github.com/kazuhikoarase/qrcode-generator === */
 //---------------------------------------------------------------------
@@ -2302,7 +2327,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9";
+const APP_VERSION = "LIVE 2.9.1";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2611,10 +2636,12 @@ function App() {
     return Object.values(sc).sort((a, b) => b.correct - a.correct);
   };
   const dist = qi => {
-    const m = answers?.[qi] || {}; const c = [0,0,0,0];
-    Object.values(m).forEach(a => { c[a.choice] = (c[a.choice]||0)+1; });
+    const m = answers?.[qi] || {};
+    const nCh = ((quiz.questions || [])[qi]?.choices || []).length || 4;
+    const c = Array.from({ length: nCh }, () => 0);
+    Object.values(m).forEach(a => { if (typeof a.choice === "number" && a.choice < nCh) c[a.choice]++; });
     const t = Object.keys(m).length || 1;
-    return c.map(n => ({ n, pct: Math.round(n/t*100) }));
+    return c.map(n => ({ n, pct: Math.round(n / t * 100) }));
   };
   const addQuestion = () => {
     const q = newQ;
@@ -3878,7 +3905,7 @@ function App() {
                   ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {curQ.choices.map((c, i) => {
-                      const d = dist(quiz.qIndex)[i]; const isAns = i === curQ.answer;
+                      const d = dist(quiz.qIndex)[i] || { n: 0, pct: 0 }; const isAns = i === curQ.answer;
                       return (
                         <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, border: "1.5px solid " + (quiz.status === "reveal" && isAns ? "#0E6B5B" : "#d8d6cc"), borderRadius: 9, padding: "8px 10px", background: quiz.status === "reveal" && isAns ? "#e7f3ee" : "#fff" }}>
                           <span style={{ fontWeight: 900 }}>{SHAPES[i]}</span>
