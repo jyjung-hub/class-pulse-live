@@ -2302,7 +2302,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.6";
+const APP_VERSION = "LIVE 2.7";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■"];
@@ -2391,6 +2391,8 @@ function App() {
   const [session, setSession] = useState(null); // 플로우 러너 {flowId, step}
   const [poll, setPoll] = useState(null); // 즉석 투표 상태
   const [quizHist, setQuizHist] = useState({});
+  const [sigLog, setSigLog] = useState({}); // 신호 이력 (타임라인용)
+  const [flowRuns, setFlowRuns] = useState({}); // 플로우 실행 기록
   const [activeFlowIdW, setActiveFlowIdW] = useState(null);
   const [semData, setSemData] = useState({}); // 학기 전체 스냅숏 (매트릭스용)
   const [connected, setConnected] = useState(null);
@@ -2418,7 +2420,7 @@ function App() {
     // 주차 전환 시 로컬 상태 초기화 후 해당 주차 구독
     setQuiz({ status: "idle", qIndex: 0, qEndsAt: 0, timeLimit: 20, questions: SEED_QUESTIONS });
     setPlayers({}); setAnswers({}); setSignals({}); setQuestionsQ({}); setExitR({}); setSession(null); setPoll(null); setQuizHist({});
-    setFlows({}); setActiveFlowIdW(null);
+    setFlows({}); setActiveFlowIdW(null); setSigLog({}); setFlowRuns({}); setMyReport(null);
     const subs = [
       [RW("quiz"), s => { const v = s.val(); if (v) setQuiz(q => ({ ...q, ...v, questions: v.questions || SEED_QUESTIONS })); }],
       [RW("players"), s => setPlayers(s.val() || {})],
@@ -2429,6 +2431,8 @@ function App() {
       [RW("session"), s => setSession(s.val())],
       [RW("poll"), s => setPoll(s.val())],
       [RW("quizHistory"), s => setQuizHist(s.val() || {})],
+      [RW("sigLog"), s => setSigLog(s.val() || {})],
+      [RW("flowRuns"), s => setFlowRuns(s.val() || {})],
       [RW("flows"), s => setFlows(s.val() || {})],
       [RW("activeFlowId"), s => setActiveFlowIdW(s.val())],
     ];
@@ -2464,13 +2468,19 @@ function App() {
   const [newAct, setNewAct] = useState(null); // 사용자 정의 활동 만들기 폼
   const [editBlock, setEditBlock] = useState(null); // 플로우 블록 편집
   const [pollDraft, setPollDraft] = useState(null); // 투표 만들기 폼
+  const [anaTab, setAnaTab] = useState("week"); // 분석 섹션
+  const [myReport, setMyReport] = useState(null); // 학생 내 리포트
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
   const notify = m => { setToast(m); setTimeout(() => setToast(null), 2600); };
+  const copyText = async t => {
+    try { await navigator.clipboard.writeText(t); notify("복사되었습니다 — Claude 대화창에 붙여넣어 분석을 요청하세요."); }
+    catch (e) { setDlg({ mode: "prompt", title: "수동 복사", desc: "아래 내용을 전체 선택해 복사하세요.", value: t, ok: () => {} }); }
+  };
   const askText = (title, desc, initial, placeholder, ok) => setDlg({ mode: "prompt", title, desc, value: initial || "", placeholder, ok });
   const askConfirm = (title, desc, ok) => setDlg({ mode: "confirm", title, desc, ok });
   const isInstructor = role === "instructor" && instructorOk;
   const refreshSem = () => db.ref(ROOM + "/weeks").once("value").then(s => setSemData(s.val() || {})).catch(() => {});
-  useEffect(() => { if (isInstructor && tab === "home") refreshSem(); }, [isInstructor, tab, W]);
+  useEffect(() => { if (isInstructor && (tab === "home" || tab === "analytics")) refreshSem(); }, [isInstructor, tab, W]);
   const semWeek = w => {
     const d = semData["w" + w] || {};
     const fl = d.flows || {};
@@ -2587,7 +2597,10 @@ function App() {
     R("questionSets/" + curSet.id + "/questions").set(curSet.questions.filter((_, j) => j !== i)));
 
   /* ---------- 신호등·질문 ---------- */
-  const setSignal = v => RW("signals/" + me.id).set({ v, ts: serverNow(), nick: me.nick });
+  const setSignal = v => {
+    RW("signals/" + me.id).set({ v, ts: serverNow(), nick: me.nick });
+    RW("sigLog/" + uid()).set({ v, ts: serverNow() }); // 타임라인 분석용 이력
+  };
   const mySignal = signals?.[me.id]?.v;
   const sigCounts = (() => {
     const fresh = Object.values(signals || {}).filter(s => serverNow() - s.ts < 30*60*1000);
@@ -2694,16 +2707,170 @@ function App() {
   const runBlock = runFlow ? runFlow.blocks[session.step] : null;
   const startFlowSession = () => {
     if (activeFlow.blocks.length === 0) return notify("플로우에 활동이 없습니다. 먼저 활동을 추가해 주세요.");
-    RW("session").set({ flowId: activeFlow.id, step: 0, startedAt: serverNow() });
+    RW("session").set({ flowId: activeFlow.id, step: 0, startedAt: serverNow(), stepLog: { 0: serverNow() } });
     notify("'" + activeFlow.name + "' 플로우로 수업을 시작합니다.");
   };
   const nextStep = () => {
     if (!runFlow) return;
     if (session.step + 1 >= runFlow.blocks.length) return endFlowSession();
+    RW("session/stepLog/" + (session.step + 1)).set(serverNow());
     RW("session/step").set(session.step + 1);
   };
-  const endFlowSession = () => askConfirm("수업 종료", "플로우 진행을 종료할까요?", () => { RW("session").remove(); endQuiz(); });
+  const endFlowSession = () => askConfirm("수업 종료", "플로우 진행을 종료할까요?", async () => {
+    if (runFlow && session && session.stepLog) { // 계획 대비 실행 분석용 기록 보존
+      await RW("flowRuns/" + uid()).set({
+        name: runFlow.name, method: runFlow.method || "-",
+        steps: runFlow.blocks.map((b, i) => ({ title: b.title, type: b.type, dur: b.dur, enteredAt: (session.stepLog || {})[i] || 0 })),
+        endedAt: serverNow(),
+      });
+    }
+    await RW("session").remove(); endQuiz();
+  });
   const openStepQuiz = () => { if (runBlock) { openLobby(runBlock.setId); setTab("quiz"); } };
+
+  /* ---------- 분석 파생값 ---------- */
+  const histList0 = Object.entries(quizHist || {}).map(([id, h]) => ({ id, ...h })).sort((x, y) => (x.endedAt || 0) - (y.endedAt || 0));
+  // 이번 주 참여자 합집합 & 개인별 정답률(완주 퀴즈 기준)
+  const weekAcc = {}; // uid -> {name, ans, cor}
+  histList0.forEach(h => Object.entries(h.answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
+    if (!weekAcc[pid]) weekAcc[pid] = { name: (h.players || {})[pid] || pid, ans: 0, cor: 0 };
+    weekAcc[pid].ans++; if (a.choice === ((h.questions || [])[qi] || {}).answer) weekAcc[pid].cor++;
+  })));
+  const weekPpl = (() => {
+    const s = new Set(Object.keys(weekAcc));
+    Object.keys(players || {}).forEach(p => s.add(p));
+    Object.keys(signals || {}).forEach(p => s.add(p));
+    Object.keys(exitR || {}).forEach(p => s.add(p));
+    return s;
+  })();
+  const coverage = {
+    total: weekPpl.size,
+    quiz: new Set([...Object.keys(weekAcc), ...Object.keys(players || {})]).size,
+    sig: Object.keys(signals || {}).length,
+    exit: Object.keys(exitR || {}).length,
+  };
+  // 자신감(Exit 1~5) × 성취(정답률) 괴리
+  const confGap = Object.entries(exitR || {}).filter(([pid]) => weekAcc[pid] && weekAcc[pid].ans > 0).map(([pid, r]) => {
+    const acc = Math.round(weekAcc[pid].cor / weekAcc[pid].ans * 100);
+    return { pid, name: r.nick || weekAcc[pid].name, scale: r.scale, acc,
+      kind: r.scale >= 4 && acc < 50 ? "over" : r.scale <= 2 && acc >= 70 ? "under" : "ok" };
+  });
+  // Exit 핵심개념 빈도
+  const conceptFreq = (() => {
+    const f = {};
+    Object.values(exitR || {}).forEach(r => { const c = (r.concept || "").trim(); if (c) f[c] = (f[c] || 0) + 1; });
+    return Object.entries(f).sort((x, y) => y[1] - x[1]).slice(0, 8);
+  })();
+  // 플로우 계획 대비 실행 (최근 실행 기록)
+  const lastRun = (() => {
+    const rs = Object.values(flowRuns || {}).sort((x, y) => (x.endedAt || 0) - (y.endedAt || 0));
+    if (!rs.length) return null;
+    const r = rs[rs.length - 1];
+    const steps = (r.steps || []).map((s, i, arr) => {
+      const next = i + 1 < arr.length ? arr[i + 1].enteredAt : r.endedAt;
+      const actual = s.enteredAt && next ? Math.max(0, Math.round((next - s.enteredAt) / 60000)) : null;
+      const plan = parseInt(s.dur) || null;
+      return { ...s, actual, plan, diff: actual !== null && plan !== null ? actual - plan : null };
+    });
+    return { ...r, steps };
+  })();
+  // 신호등 타임라인 (10분 버킷)
+  const sigTimeline = (() => {
+    const logs = Object.values(sigLog || {}).sort((x, y) => x.ts - y.ts);
+    if (logs.length < 2) return null;
+    const t0 = logs[0].ts, t1 = logs[logs.length - 1].ts;
+    const span = Math.max(t1 - t0, 60000);
+    const nB = Math.min(12, Math.max(3, Math.ceil(span / 600000)));
+    const bw = span / nB;
+    const buckets = Array.from({ length: nB }, () => ({ g: 0, y: 0, r: 0 }));
+    logs.forEach(l => { const b = Math.min(nB - 1, Math.floor((l.ts - t0) / bw)); buckets[b][l.v] = (buckets[b][l.v] || 0) + 1; });
+    const marks = lastRun ? lastRun.steps.filter(s => s.enteredAt >= t0 && s.enteredAt <= t1).map((s, i) => ({ pos: (s.enteredAt - t0) / span, title: s.title })) : [];
+    return { buckets, t0, t1, marks };
+  })();
+  // 학기: 주차별 지표 + 조기 경보 + 교수법 비교 (semData 기반)
+  const semRows = (() => {
+    const rows = [];
+    for (let w = 1; w <= 15; w++) {
+      const d = semData["w" + w] || {};
+      const hist = d.quizHistory || {};
+      let t = 0, c = 0; const ppl = new Set();
+      Object.values(hist).forEach(h => Object.entries(h.answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
+        ppl.add(pid); t++; if (a.choice === ((h.questions || [])[qi] || {}).answer) c++;
+      })));
+      Object.keys(d.exit || {}).forEach(p => ppl.add(p));
+      const ex = Object.values(d.exit || {});
+      const fl = d.flows || {};
+      const af = fl[d.activeFlowId] || Object.values(fl)[0];
+      rows.push({ w, ppl: ppl.size, acc: t ? Math.round(c / t * 100) : null,
+        exitAvg: ex.length ? Math.round(ex.reduce((s, r) => s + (r.scale || 0), 0) / ex.length * 10) / 10 : null,
+        method: af ? (af.method || "-") : null, hasData: ppl.size > 0 });
+    }
+    return rows;
+  })();
+  const methodCmp = (() => {
+    const g = {};
+    semRows.filter(r => r.hasData && r.method && r.method !== "-").forEach(r => {
+      if (!g[r.method]) g[r.method] = { n: 0, acc: [], exit: [], ppl: [] };
+      g[r.method].n++;
+      if (r.acc !== null) g[r.method].acc.push(r.acc);
+      if (r.exitAvg !== null) g[r.method].exit.push(r.exitAvg);
+      g[r.method].ppl.push(r.ppl);
+    });
+    const avg = arr => arr.length ? Math.round(arr.reduce((s, x) => s + x, 0) / arr.length * 10) / 10 : null;
+    return Object.entries(g).map(([m, v]) => ({ method: m, n: v.n, acc: avg(v.acc), exit: avg(v.exit), ppl: avg(v.ppl) }));
+  })();
+  const earlyWarn = (() => {
+    const stu = {}; // pid -> {name, weeks:{w:{present, acc}}}
+    for (let w = 1; w <= 15; w++) {
+      const d = semData["w" + w] || {};
+      const hist = d.quizHistory || {};
+      const seen = {};
+      Object.values(hist).forEach(h => {
+        const perQ = {};
+        Object.entries(h.answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
+          if (!perQ[pid]) perQ[pid] = { a: 0, c: 0, name: (h.players || {})[pid] || pid };
+          perQ[pid].a++; if (a.choice === ((h.questions || [])[qi] || {}).answer) perQ[pid].c++;
+        }));
+        Object.entries(perQ).forEach(([pid, v]) => { seen[pid] = { name: v.name, acc: Math.round(v.c / v.a * 100) }; });
+      });
+      Object.entries(d.exit || {}).forEach(([pid, r]) => { if (!seen[pid]) seen[pid] = { name: r.nick || pid, acc: null }; });
+      Object.entries(seen).forEach(([pid, v]) => {
+        if (!stu[pid]) stu[pid] = { name: v.name, weeks: {} };
+        stu[pid].name = v.name; stu[pid].weeks[w] = v;
+      });
+    }
+    const activeWeeks = semRows.filter(r => r.hasData).map(r => r.w);
+    const out = [];
+    Object.entries(stu).forEach(([pid, s]) => {
+      const reasons = [];
+      const recent = activeWeeks.slice(-2);
+      if (recent.length === 2 && recent.every(w => !s.weeks[w])) reasons.push("최근 2개 활동주차 연속 미참여");
+      const accs = activeWeeks.map(w => s.weeks[w] && s.weeks[w].acc).filter(x => x !== null && x !== undefined);
+      if (accs.length >= 3 && accs[accs.length-1] < accs[accs.length-2] && accs[accs.length-2] < accs[accs.length-3]) reasons.push("정답률 3회 연속 하락");
+      if (accs.length >= 2 && (accs.reduce((a, b) => a + b, 0) / accs.length) < 50) reasons.push("학기 평균 정답률 50% 미만");
+      if (reasons.length) out.push({ name: s.name, reasons, avg: accs.length ? Math.round(accs.reduce((a, b) => a + b, 0) / accs.length) : null });
+    });
+    return out.sort((a, b) => b.reasons.length - a.reasons.length);
+  })();
+  // AI 분석 프롬프트
+  const buildAIPrompt = () => {
+    const opens = Object.values(exitR || {}).map(r => (r.open || "").trim()).filter(Boolean);
+    const qs = Object.values(questionsQ || {}).map(q => q.text).filter(Boolean);
+    const lowQ = [];
+    histList0.forEach(h => (h.questions || []).forEach((q, qi) => {
+      const m = (h.answers || {})[qi] || {}; const n = Object.keys(m).length;
+      if (!n) return;
+      const c = Object.values(m).filter(x => x.choice === q.answer).length;
+      const p = Math.round(c / n * 100);
+      if (p < 60) lowQ.push('"' + q.q + '" (정답률 ' + p + '%)');
+    }));
+    return "당신은 대학 교수설계 전문가입니다. 아래는 " + weekLabel(W) + "차 수업의 형성평가 데이터입니다.\n\n" +
+      "[학생들이 꼽은 핵심 개념 빈도]\n" + (conceptFreq.map(([c, n]) => "- " + c + " (" + n + "명)").join("\n") || "- 없음") + "\n\n" +
+      "[Exit Ticket 서술 응답 — 궁금하거나 헷갈리는 점]\n" + (opens.map(o => "- " + o).join("\n") || "- 없음") + "\n\n" +
+      "[수업 중 익명 질문]\n" + (qs.map(q => "- " + q).join("\n") || "- 없음") + "\n\n" +
+      "[정답률 60% 미만 문항]\n" + (lowQ.map(q => "- " + q).join("\n") || "- 없음") + "\n\n" +
+      "요청: ① 서술 응답과 질문을 오개념 유형별로 군집화하고 각 군집의 핵심 원인을 진단해 주세요. ② JiTT 관점에서 다음 차시 도입부에 다뤄야 할 보강 포인트 3가지를 우선순위와 함께 제안해 주세요. ③ 정답률이 낮은 문항이 문항 자체의 문제인지 개념 이해의 문제인지 판별 의견을 주세요.";
+  };
 
   /* ---------- Excel 출력 ---------- */
   const histList = Object.entries(quizHist || {}).map(([id, h]) => ({ id, ...h })).sort((x, y) => (x.endedAt || 0) - (y.endedAt || 0));
@@ -2958,30 +3125,46 @@ function App() {
       wsG["!rows"] = [{ hpt: 22 }, { hpt: 16 }];
       xlBorder(wsG, 0); XLSX.utils.book_append_sheet(wb, wsG, "성적표");
 
-      /* ===== ③ 문항 분석 (난이도 색 + 오답지 매력도) ===== */
+      /* ===== ③ 문항 분석 (난이도 색 + 변별도 + 오답지 매력도) ===== */
       const maxC = Math.max(...G.map(g => Math.max(...g.questions.map(q => (q.choices || []).length), 0)), 4);
-      const qHead = ["주차", "퀴즈", "Q", "문항", "정답", "응답수", "정답률%"];
+      const qHead = ["주차", "퀴즈", "Q", "문항", "정답", "응답수", "정답률%", "변별도"];
       for (let k = 0; k < maxC; k++) qHead.push("보기" + (k + 1) + " 선택%");
       const qA = [qHead]; const qStyles = [];
-      G.forEach(g => g.questions.forEach((q, qi) => {
-        const m = g.answers[qi] || {}; const n = Object.keys(m).length;
-        const cor = Object.values(m).filter(a => a.choice === q.answer).length;
-        const pct = n ? Math.round(cor / n * 100) : 0;
-        const row = [g.week, g.setName, qi + 1, q.q, (q.choices || [])[q.answer] || "", n, pct];
-        for (let k = 0; k < maxC; k++) {
-          if (!(q.choices || [])[k]) { row.push(""); continue; }
-          const sel = Object.values(m).filter(a => a.choice === k).length;
-          row.push(n ? Math.round(sel / n * 100) : 0);
-        }
-        const r = qA.length;
-        qStyles.push([r, 6, pct < 50 ? "low" : "center"]);
-        qStyles.push([r, 7 + q.answer, "correct"]);
-        qA.push(row);
-      }));
+      G.forEach(g => {
+        const totMap = {};
+        Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
+          totMap[pid] = (totMap[pid] || 0) + (a.choice === (g.questions[qi] || {}).answer ? 1 : 0);
+        }));
+        const sortedIds = Object.keys(totMap).sort((x, y) => totMap[y] - totMap[x]);
+        const half = Math.floor(sortedIds.length / 2);
+        const topS = new Set(sortedIds.slice(0, half));
+        const botS = new Set(sortedIds.slice(sortedIds.length - half));
+        g.questions.forEach((q, qi) => {
+          const m = g.answers[qi] || {}; const n = Object.keys(m).length;
+          const cor = Object.values(m).filter(a => a.choice === q.answer).length;
+          const pct = n ? Math.round(cor / n * 100) : 0;
+          let disc = "-";
+          if (half >= 2) {
+            const pOf = set => { let t = 0, c = 0; Object.entries(m).forEach(([pid, a]) => { if (set.has(pid)) { t++; if (a.choice === q.answer) c++; } }); return t ? c / t : 0; };
+            disc = Math.round((pOf(topS) - pOf(botS)) * 100) / 100;
+          }
+          const row = [g.week, g.setName, qi + 1, q.q, (q.choices || [])[q.answer] || "", n, pct, disc];
+          for (let k = 0; k < maxC; k++) {
+            if (!(q.choices || [])[k]) { row.push(""); continue; }
+            const sel = Object.values(m).filter(a => a.choice === k).length;
+            row.push(n ? Math.round(sel / n * 100) : 0);
+          }
+          const r = qA.length;
+          qStyles.push([r, 6, pct < 50 ? "low" : "center"]);
+          if (disc !== "-" && disc < 0.2) qStyles.push([r, 7, "gB"]); else qStyles.push([r, 7, "center"]);
+          qStyles.push([r, 8 + q.answer, "correct"]);
+          qA.push(row);
+        });
+      });
       const wsQ = XLSX.utils.aoa_to_sheet(qA);
       for (let c = 0; c < qHead.length; c++) { const cell = wsQ[addr(0, c)]; if (cell) cell.s = ST.head; }
       qStyles.forEach(([r, c, k]) => { const cell = wsQ[addr(r, c)]; if (cell) cell.s = ST[k]; });
-      wsQ["!cols"] = [{ wch: 5 }, { wch: 14 }, { wch: 4 }, { wch: 42 }, { wch: 16 }, { wch: 7 }, { wch: 8 }, ...Array.from({ length: maxC }, () => ({ wch: 10 }))];
+      wsQ["!cols"] = [{ wch: 5 }, { wch: 14 }, { wch: 4 }, { wch: 42 }, { wch: 16 }, { wch: 7 }, { wch: 8 }, { wch: 7 }, ...Array.from({ length: maxC }, () => ({ wch: 10 }))];
       xlBorder(wsQ, 0); XLSX.utils.book_append_sheet(wb, wsQ, "문항분석");
 
       /* ===== ④ 주차별 요약 (참여율) ===== */
@@ -3263,6 +3446,46 @@ function App() {
                 <div><div style={{ fontWeight: 900, fontSize: 13.5 }}>⏻ Exit Ticket</div><div style={{ fontSize: 11.5, color: "#787b82" }}>{myExit ? "제출 완료 ✓" : "3문항 · 약 30초 · 성적 미반영"}</div></div>
                 <Btn onClick={() => setTab("exit")}>{myExit ? "다시 보기" : "응답하기"}</Btn>
               </div>
+            </Card>
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div><div style={{ fontWeight: 900, fontSize: 13.5 }}>📈 내 학습 리포트</div><div style={{ fontSize: 11.5, color: "#787b82" }}>학기 퀴즈 성적과 참여 이력 (본인만 표시)</div></div>
+                <Btn onClick={async () => {
+                  if (myReport) return setMyReport(null);
+                  try {
+                    const snap = await db.ref(ROOM + "/weeks").once("value");
+                    const weeks = snap.val() || {};
+                    const rows = []; let sum = 0, tot = 0, exitN = 0;
+                    for (let w = 1; w <= 15; w++) {
+                      const d = weeks["w" + w] || {};
+                      Object.values(d.quizHistory || {}).forEach(h => {
+                        const qs = h.questions || []; let mine = 0, cnt = 0;
+                        Object.entries(h.answers || {}).forEach(([qi, m]) => { const x = (m || {})[me.id]; if (x !== undefined) { cnt++; if (x.choice === (qs[qi] || {}).answer) mine++; } });
+                        if (cnt > 0) { rows.push({ w, name: h.setName, mine, n: qs.length, graded: !!h.graded }); sum += mine; tot += qs.length; }
+                      });
+                      if ((d.exit || {})[me.id]) exitN++;
+                    }
+                    setMyReport({ rows, sum, tot, exitN });
+                  } catch (e) { notify("리포트를 불러오지 못했습니다."); }
+                }}>{myReport ? "닫기" : "보기"}</Btn>
+              </div>
+              {myReport && (
+                <div className="fade" style={{ marginTop: 10, borderTop: "1px dashed #eceade", paddingTop: 10 }}>
+                  {myReport.rows.length === 0
+                    ? <div style={{ fontSize: 12, color: "#a9aca7" }}>아직 응시 기록이 없습니다.</div>
+                    : (<React.Fragment>
+                      <div style={{ fontSize: 12.5, marginBottom: 8 }}>학기 정답률 <b style={{ color: "#0F6E56", fontSize: 15 }}>{myReport.tot ? Math.round(myReport.sum / myReport.tot * 100) : 0}%</b> ({myReport.sum}/{myReport.tot}) · Exit 제출 {myReport.exitN}회</div>
+                      {myReport.rows.map((r, k) => (
+                        <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12 }}>
+                          <span style={{ minWidth: 34, color: "#787b82" }}>{r.w}주</span>
+                          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}{r.graded && " 🎯"}</span>
+                          <span style={{ minWidth: 80, height: 11, background: "#e7e5dc", borderRadius: 4, overflow: "hidden" }}><span style={{ display: "block", width: (r.n ? r.mine / r.n * 100 : 0) + "%", height: "100%", background: "#0E6B5B" }} /></span>
+                          <span style={{ fontFamily: "monospace", minWidth: 34, textAlign: "right" }}>{r.mine}/{r.n}</span>
+                        </div>
+                      ))}
+                    </React.Fragment>)}
+                </div>
+              )}
             </Card>
           </div>
         ))}
@@ -3787,50 +4010,257 @@ function App() {
         {/* ==================== ANALYTICS ==================== */}
         {tab === "analytics" && isInstructor && (
           <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Card>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-                <Label>Excel 출력</Label>
-              </div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-                <Btn sm onClick={exportWeekExcel}>📥 {W}주차 활동 Excel</Btn>
-              </div>
-              <div style={{ fontSize: 10.5, color: "#787b82", marginBottom: 12 }}>ⓘ 퀴즈는 마지막 문항까지 진행해 "결과 보기"에 도달해야 기록됩니다. 이번 주 기록: {histList.length}건{histList.length > 0 && " — " + histList.map(h => h.setName + (h.graded ? "(🎯)" : "")).join(", ")}</div>
-              <Label>문항별 정답률 (현재 세션)</Label>
-              {analytics.perQ.map((p, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 12 }}>
-                  <span style={{ minWidth: 28, fontWeight: 900 }}>Q{i+1}</span>
-                  <div style={{ flex: 1, height: 14, background: "#e7e5dc", borderRadius: 4, overflow: "hidden" }}><div style={{ width: p.pct+"%", height: "100%", background: "#0E6B5B" }} /></div>
-                  <span style={{ fontFamily: "monospace", minWidth: 64, textAlign: "right" }}>{p.pct}% ({p.n}명)</span>
-                </div>
+            <div style={{ display: "flex", border: "1.5px solid #24272B", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+              {[["week", "📋 이번 수업"], ["stu", "👥 학생"], ["sem", "📈 학기"]].map(([k, v]) => (
+                <button key={k} onClick={() => setAnaTab(k)} style={{ flex: 1, padding: "9px 4px", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, background: anaTab === k ? "#0E6B5B" : "transparent", color: anaTab === k ? "#fff" : "#55585f" }}>{v}</button>
               ))}
-            </Card>
-            <Card>
-              <Label>학생 참여 프로파일 (교수자 전용)</Label>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            </div>
+
+            {/* ========== 이번 수업 ========== */}
+            {anaTab === "week" && (<React.Fragment>
+              <Card>
+                <Label>활동 커버리지 · {weekLabel(W)} · 참여자 {coverage.total}명 기준</Label>
+                {[["▶ 퀴즈 응시", coverage.quiz], ["🚦 신호 참여", coverage.sig], ["⏻ Exit 제출", coverage.exit]].map(([k, n], idx) => {
+                  const pct = coverage.total ? Math.round(n / coverage.total * 100) : 0;
+                  return (
+                    <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 12.5 }}>
+                      <span style={{ minWidth: 92 }}>{k}</span>
+                      <div style={{ flex: 1, height: 15, background: "#e7e5dc", borderRadius: 6, overflow: "hidden" }}><div style={{ width: pct + "%", height: "100%", background: pct >= 70 ? "#0E6B5B" : pct >= 40 ? "#EF9F27" : "#E24B4A", transition: "width .4s" }} /></div>
+                      <span style={{ fontFamily: "monospace", minWidth: 74, textAlign: "right" }}>{n}명 ({pct}%)</span>
+                    </div>
+                  );
+                })}
+                {coverage.total === 0 && <div style={{ fontSize: 12, color: "#a9aca7" }}>이번 주 참여 데이터가 아직 없습니다.</div>}
+              </Card>
+
+              {lastRun && (
+                <Card>
+                  <Label>플로우 계획 대비 실행 · {lastRun.name}</Label>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead><tr style={{ color: "#787b82", fontSize: 10.5, textAlign: "left" }}>
+                      <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B" }}>단계</th>
+                      <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>계획</th>
+                      <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>실제</th>
+                      <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>차이</th>
+                    </tr></thead>
+                    <tbody>
+                      {lastRun.steps.map((s, k) => (
+                        <tr key={k}>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade" }}>{k + 1}. {s.title}</td>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{s.plan !== null ? s.plan + "분" : s.dur}</td>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{s.actual !== null ? s.actual + "분" : "—"}</td>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: s.diff === null ? "#a9aca7" : s.diff > 5 ? "#b3402a" : s.diff < -5 ? "#BA7517" : "#0F6E56" }}>{s.diff === null ? "—" : (s.diff > 0 ? "+" : "") + s.diff + "분"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6 }}>ⓘ 플로우를 [수업 종료]까지 진행하면 기록됩니다. 빨강=계획 초과, 주황=계획 미달.</div>
+                </Card>
+              )}
+
+              <Card>
+                <Label>신호등 타임라인 (수업 중 이해도 변화)</Label>
+                {sigTimeline ? (
+                  <div>
+                    <div style={{ position: "relative", display: "flex", gap: 3, alignItems: "flex-end", height: 84, padding: "14px 0 2px" }}>
+                      {sigTimeline.buckets.map((b, k) => {
+                        const t = (b.g + b.y + b.r) || 1;
+                        return (
+                          <div key={k} style={{ flex: 1, display: "flex", flexDirection: "column", height: 64, borderRadius: 4, overflow: "hidden" }}>
+                            <div style={{ height: (b.r / t * 100) + "%", background: "#F3C1B4" }} />
+                            <div style={{ height: (b.y / t * 100) + "%", background: "#F6E7B2" }} />
+                            <div style={{ height: (b.g / t * 100) + "%", background: "#BFE3CF" }} />
+                          </div>
+                        );
+                      })}
+                      {sigTimeline.marks.map((m, k) => (
+                        <div key={"m" + k} title={m.title} style={{ position: "absolute", left: (m.pos * 100) + "%", top: 0, bottom: 0, width: 2, background: "#24272B", opacity: .55 }}>
+                          <span style={{ position: "absolute", top: -2, left: 3, fontSize: 9, color: "#55585f", whiteSpace: "nowrap", maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", display: "inline-block" }}>{m.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#787b82" }}>
+                      <span>{new Date(sigTimeline.t0).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>
+                      <span>세로선 = 플로우 단계 전환</span>
+                      <span>{new Date(sigTimeline.t1).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>
+                  </div>
+                ) : <div style={{ fontSize: 12, color: "#a9aca7" }}>신호 이력이 쌓이면 시간대별 🟢🟡🔴 비율 변화가 표시됩니다. (이번 버전부터 수집 시작)</div>}
+              </Card>
+
+              <Card>
+                <Label>자신감 × 성취 괴리 (Exit 자기보고 대비 퀴즈 정답률)</Label>
+                {confGap.length ? (
+                  <div>
+                    <svg viewBox="0 0 320 170" style={{ width: "100%", maxWidth: 460 }} role="img" aria-label="자신감 대비 정답률 산점도">
+                      <line x1="40" y1="10" x2="40" y2="140" stroke="#24272B" strokeWidth="1.5" />
+                      <line x1="40" y1="140" x2="310" y2="140" stroke="#24272B" strokeWidth="1.5" />
+                      <line x1="40" y1="62" x2="310" y2="62" stroke="#d8d6cc" strokeDasharray="4 3" />
+                      <line x1="196" y1="10" x2="196" y2="140" stroke="#d8d6cc" strokeDasharray="4 3" />
+                      <text x="8" y="16" fontSize="9" fill="#787b82">100%</text>
+                      <text x="14" y="66" fontSize="9" fill="#787b82">60%</text>
+                      <text x="24" y="144" fontSize="9" fill="#787b82">0</text>
+                      <text x="44" y="156" fontSize="9" fill="#787b82">이해도 1</text>
+                      <text x="284" y="156" fontSize="9" fill="#787b82">5</text>
+                      {confGap.map((p, k) => (
+                        <circle key={k} cx={40 + (p.scale - 1) / 4 * 260 + (k % 3 - 1) * 4} cy={140 - p.acc / 100 * 128} r="5"
+                          fill={p.kind === "over" ? "#E24B4A" : p.kind === "under" ? "#EF9F27" : "#1D9E75"} opacity="0.85" />
+                      ))}
+                    </svg>
+                    <div style={{ display: "flex", gap: 12, fontSize: 10.5, color: "#55585f", flexWrap: "wrap", marginTop: 2 }}>
+                      <span>🔴 과신 (이해했다 답했지만 정답률 낮음): <b>{confGap.filter(p => p.kind === "over").length}명</b>{confGap.filter(p => p.kind === "over").length > 0 && " — " + confGap.filter(p => p.kind === "over").map(p => p.name).join(", ")}</span>
+                      <span>🟠 과소평가: <b>{confGap.filter(p => p.kind === "under").length}명</b></span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 4 }}>ⓘ 과신 그룹은 스스로 모른다는 것을 모르는 상태 — 다음 차시 도입에서 해당 개념 재확인을 권장합니다.</div>
+                  </div>
+                ) : <div style={{ fontSize: 12, color: "#a9aca7" }}>Exit 제출과 퀴즈 완주 기록이 모두 있는 학생이 생기면 표시됩니다.</div>}
+              </Card>
+
+              <Card>
+                <Label>Exit 질적 요약 & AI 분석</Label>
+                <div style={{ fontSize: 11.5, color: "#787b82", marginBottom: 4 }}>핵심 개념 빈도</div>
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+                  {conceptFreq.map(([c, n], k) => <span key={k} style={{ background: "#e7f3ee", borderRadius: 20, padding: "3px 11px", fontSize: 12 }}>{c} <b style={{ color: "#0F6E56" }}>{n}</b></span>)}
+                  {conceptFreq.length === 0 && <span style={{ fontSize: 12, color: "#a9aca7" }}>응답 대기 중</span>}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#787b82", marginBottom: 6 }}>서술 응답 {Object.values(exitR || {}).filter(r => (r.open || "").trim()).length}건 · 익명 질문 {Object.keys(questionsQ || {}).length}건</div>
+                <Btn pri sm onClick={() => copyText(buildAIPrompt())}>🤖 AI 분석 프롬프트 복사 (Claude에 붙여넣기)</Btn>
+                <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6 }}>ⓘ 오개념 군집화·다음 차시 보강 포인트·문항 진단 요청이 포함된 프롬프트가 복사됩니다. AI 결과는 초안이며 최종 판단은 교수자가 합니다.</div>
+              </Card>
+
+              <Card>
+                <Label>문항별 정답률 (이번 주 완주 퀴즈)</Label>
+                {histList0.map(h => (h.questions || []).map((q, qi) => {
+                  const m = (h.answers || {})[qi] || {}; const n = Object.keys(m).length;
+                  const c = Object.values(m).filter(x => x.choice === q.answer).length;
+                  const p = n ? Math.round(c / n * 100) : 0;
+                  return (
+                    <div key={h.id + qi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12 }}>
+                      <span style={{ minWidth: 30, fontWeight: 900 }}>Q{qi + 1}</span>
+                      <span style={{ minWidth: 90, fontSize: 10.5, color: "#787b82", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.setName}</span>
+                      <div style={{ flex: 1, height: 13, background: "#e7e5dc", borderRadius: 4, overflow: "hidden" }}><div style={{ width: p + "%", height: "100%", background: p < 50 ? "#E24B4A" : "#0E6B5B" }} /></div>
+                      <span style={{ fontFamily: "monospace", minWidth: 62, textAlign: "right" }}>{p}% ({n}명)</span>
+                    </div>
+                  );
+                }))}
+                {histList0.length === 0 && <div style={{ fontSize: 12, color: "#a9aca7" }}>완주한 퀴즈가 아직 없습니다.</div>}
+                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                  <Btn sm onClick={exportWeekExcel}>📥 {W}주차 활동 리포트 Excel</Btn>
+                </div>
+              </Card>
+            </React.Fragment>)}
+
+            {/* ========== 학생 ========== */}
+            {anaTab === "stu" && (<React.Fragment>
+              {earlyWarn.length > 0 && (
+                <Card style={{ border: "2px solid #b3402a" }}>
+                  <Label>⚠ 조기 경보 — 관심이 필요한 학생 {earlyWarn.length}명 (학기 전체 기준)</Label>
+                  {earlyWarn.map((s, k) => (
+                    <div key={k} style={{ padding: "6px 0", borderBottom: "1px dashed #eceade", fontSize: 12.5 }}>
+                      <b>{s.name}</b>{s.avg !== null && <span style={{ fontFamily: "monospace", color: "#787b82" }}> · 평균 {s.avg}%</span>}
+                      <div style={{ fontSize: 11, color: "#b3402a", marginTop: 2 }}>{s.reasons.join(" · ")}</div>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6 }}>ⓘ 기준: 최근 활동주차 연속 미참여 / 정답률 연속 하락 / 학기 평균 50% 미만. 상담·개별 피드백 참고용입니다.</div>
+                </Card>
+              )}
+              <Card>
+                <Label>이번 주 참여 프로파일</Label>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 430 }}>
+                    <thead><tr style={{ color: "#787b82", fontSize: 10.5, textAlign: "left" }}>
+                      <th style={{ padding: "4px 6px", borderBottom: "1.5px solid #24272B" }}>표시이름</th>
+                      <th style={{ padding: "4px 6px", borderBottom: "1.5px solid #24272B" }}>퀴즈</th>
+                      <th style={{ padding: "4px 6px", borderBottom: "1.5px solid #24272B" }}>정답률</th>
+                      <th style={{ padding: "4px 6px", borderBottom: "1.5px solid #24272B" }}>신호</th>
+                      <th style={{ padding: "4px 6px", borderBottom: "1.5px solid #24272B" }}>Exit</th>
+                    </tr></thead>
+                    <tbody>
+                      {[...weekPpl].map(pid => {
+                        const a = weekAcc[pid];
+                        const nm = (a && a.name) || (players || {})[pid] || ((signals || {})[pid] || {}).nick || ((exitR || {})[pid] || {}).nick || pid;
+                        const rate = a && a.ans ? Math.round(a.cor / a.ans * 100) : null;
+                        const sg = (signals || {})[pid];
+                        const ex = (exitR || {})[pid];
+                        return (
+                          <tr key={pid}>
+                            <td style={{ padding: 6, borderBottom: "1px dashed #eceade" }}>{nm}</td>
+                            <td style={{ padding: 6, borderBottom: "1px dashed #eceade", fontFamily: "monospace" }}>{a ? a.ans + "건" : "—"}</td>
+                            <td style={{ padding: 6, borderBottom: "1px dashed #eceade", fontFamily: "monospace", fontWeight: 700, color: rate === null ? "#a9aca7" : rate < 50 ? "#b3402a" : "#0F6E56" }}>{rate === null ? "—" : rate + "%"}</td>
+                            <td style={{ padding: 6, borderBottom: "1px dashed #eceade" }}>{sg ? (sg.v === "g" ? "🟢" : sg.v === "y" ? "🟡" : "🔴") : "—"}</td>
+                            <td style={{ padding: 6, borderBottom: "1px dashed #eceade" }}>{ex ? "✓ " + ex.scale + "/5" : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                      {weekPpl.size === 0 && <tr><td colSpan={5} style={{ padding: 10, color: "#a9aca7", fontSize: 12.5 }}>아직 참여 데이터가 없습니다.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </React.Fragment>)}
+
+            {/* ========== 학기 ========== */}
+            {anaTab === "sem" && (<React.Fragment>
+              <Card>
+                <Label>주차별 추이 — 참여 · 정답률 · 이해도</Label>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
                   <thead><tr style={{ color: "#787b82", fontSize: 10.5, textAlign: "left" }}>
-                    <th style={{ padding: "4px 6px", borderBottom: "1.5px solid #24272B" }}>닉네임</th>
-                    <th style={{ padding: "4px 6px", borderBottom: "1.5px solid #24272B" }}>퀴즈 응답</th>
-                    <th style={{ padding: "4px 6px", borderBottom: "1.5px solid #24272B" }}>정답률</th>
-                    <th style={{ padding: "4px 6px", borderBottom: "1.5px solid #24272B" }}>EXT</th>
+                    <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", width: 60 }}>주차</th>
+                    <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", width: 54 }}>참여</th>
+                    <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B" }}>정답률</th>
+                    <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", width: 110 }}>Exit 이해도</th>
                   </tr></thead>
                   <tbody>
-                    {analytics.users.map((u, i) => {
-                      const rate = u.quizAns ? Math.round(u.quizCorrect/u.quizAns*100) : null;
-                      return (
-                        <tr key={i}>
-                          <td style={{ padding: 6, borderBottom: "1px dashed #eceade" }}>{u.nick}</td>
-                          <td style={{ padding: 6, borderBottom: "1px dashed #eceade", fontFamily: "monospace" }}>{u.quizAns}건</td>
-                          <td style={{ padding: 6, borderBottom: "1px dashed #eceade", fontFamily: "monospace" }}>{rate === null ? "—" : rate + "%"}</td>
-                          <td style={{ padding: 6, borderBottom: "1px dashed #eceade" }}>{u.exit ? "✓" : "—"}</td>
-                        </tr>
-                      );
-                    })}
-                    {analytics.users.length === 0 && <tr><td colSpan={4} style={{ padding: 10, color: "#a9aca7", fontSize: 12.5 }}>아직 참여 데이터가 없습니다.</td></tr>}
+                    {semRows.filter(r => r.hasData).map(r => (
+                      <tr key={r.w} style={{ background: r.w === W ? "#E7F3EE" : undefined }}>
+                        <td style={{ padding: "4px", borderBottom: "1px dashed #eceade", fontWeight: r.w === W ? 900 : 400 }}>{r.w}주{(r.w === 8 || r.w === 15) ? "🎓" : ""}</td>
+                        <td style={{ padding: "4px", borderBottom: "1px dashed #eceade", fontFamily: "monospace" }}>{r.ppl}명</td>
+                        <td style={{ padding: "4px", borderBottom: "1px dashed #eceade" }}>
+                          {r.acc === null ? <span style={{ color: "#a9aca7" }}>—</span> : (
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ flex: 1, height: 11, background: "#e7e5dc", borderRadius: 4, overflow: "hidden", display: "block" }}><span style={{ display: "block", width: r.acc + "%", height: "100%", background: r.acc < 50 ? "#E24B4A" : "#0E6B5B" }} /></span>
+                              <span style={{ fontFamily: "monospace", minWidth: 34, textAlign: "right" }}>{r.acc}%</span>
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: "4px", borderBottom: "1px dashed #eceade", fontFamily: "monospace" }}>{r.exitAvg === null ? "—" : "★ " + r.exitAvg + "/5"}</td>
+                      </tr>
+                    ))}
+                    {semRows.filter(r => r.hasData).length === 0 && <tr><td colSpan={4} style={{ padding: 10, color: "#a9aca7", fontSize: 12.5 }}>활동 데이터가 쌓이면 추이가 표시됩니다.</td></tr>}
                   </tbody>
                 </table>
-              </div>
-            </Card>
+              </Card>
+              <Card>
+                <Label>교수법별 비교 (플로우 유형 기준)</Label>
+                {methodCmp.length ? (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead><tr style={{ color: "#787b82", fontSize: 10.5, textAlign: "left" }}>
+                      <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B" }}>교수법</th>
+                      <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>주차 수</th>
+                      <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>평균 정답률</th>
+                      <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>Exit 이해도</th>
+                      <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>평균 참여</th>
+                    </tr></thead>
+                    <tbody>
+                      {methodCmp.map((m, k) => (
+                        <tr key={k}>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", fontWeight: 700 }}>{m.method}</td>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{m.n}</td>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#0F6E56" }}>{m.acc === null ? "—" : m.acc + "%"}</td>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{m.exit === null ? "—" : m.exit + "/5"}</td>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{m.ppl === null ? "—" : m.ppl + "명"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : <div style={{ fontSize: 12, color: "#a9aca7" }}>플로우(교수법 템플릿)로 운영한 주차가 2개 이상 쌓이면 수업 유형별 효과 비교가 표시됩니다.</div>}
+                <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6 }}>ⓘ 각 주차의 활성 플로우 유형을 기준으로 집계합니다. 사례보고·논문의 기초 데이터로 활용할 수 있습니다.</div>
+              </Card>
+              <Card>
+                <Label>학기 리포트 출력</Label>
+                <Btn pri sm onClick={exportGradedExcel}>📥 성적 리포트 Excel (문항 변별도 포함)</Btn>
+              </Card>
+            </React.Fragment>)}
           </div>
         )}
       </main>
