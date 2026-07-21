@@ -2295,7 +2295,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 1.2";
+const APP_VERSION = "LIVE 1.3";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■"];
@@ -2310,13 +2310,13 @@ const SEED_QUESTIONS = [
 
 const ACT_TYPES = {BRD:"협업 보드",QZG:"게임 퀴즈",QZS:"자기속도 퀴즈",POL:"즉석 투표",EXT:"Exit Ticket",SIG:"신호등",SGQ:"학생 출제"};
 const FLOW_TEMPLATES = {
-  "플립러닝": { desc: "사전학습 데이터로 본 수업을 조정하는 구조 (JiTT)", blocks: [["QZS","사전학습 확인 퀴즈","수업 전"],["POL","사전학습 난이도 체감","5분"],["BRD","팀 활동·사례 분석","20분"],["QZG","정리 퀴즈","15분"],["EXT","Exit Ticket","자동"]] },
-  "PBL": { desc: "실제적 문제 중심의 팀 탐구 (문제기반학습)", blocks: [["BRD","문제 제시·쟁점 브레인스토밍","10분"],["BRD","팀별 해결안 작성","25분"],["POL","해결안 동료 투표","5분"],["QZG","핵심 개념 확인","10분"],["EXT","Exit Ticket","자동"]] },
-  "토론수업": { desc: "입장 변화를 데이터로 확인하는 구조화 토론", blocks: [["POL","사전 입장 조사","3분"],["BRD","찬반 논거 보드","20분"],["SGQ","반박 문항 출제·상호 풀이","12분"],["POL","사후 입장 조사","3분"],["EXT","Exit Ticket","자동"]] },
+  "플립러닝": { desc: "사전학습 데이터로 본 수업을 조정하는 구조 (JiTT)", blocks: [["QZS","사전학습 확인 퀴즈","수업 전"],["POL","사전학습 난이도 체감","5분",{q:"사전학습, 해보니 어땠나요?",choices:["쉬웠다","보통이었다","어려웠다","하지 못했다"]}],["BRD","팀 활동·사례 분석","20분"],["QZG","정리 퀴즈","15분"],["EXT","Exit Ticket","자동"]] },
+  "PBL": { desc: "실제적 문제 중심의 팀 탐구 (문제기반학습)", blocks: [["BRD","문제 제시·쟁점 브레인스토밍","10분"],["BRD","팀별 해결안 작성","25분"],["POL","해결안 동료 투표","5분",{q:"가장 설득력 있는 해결안은?",choices:["1팀","2팀","3팀","4팀"]}],["QZG","핵심 개념 확인","10분"],["EXT","Exit Ticket","자동"]] },
+  "토론수업": { desc: "입장 변화를 데이터로 확인하는 구조화 토론", blocks: [["POL","사전 입장 조사","3분",{q:"이 논제에 대한 나의 입장은?",choices:["찬성","중립","반대"]}],["BRD","찬반 논거 보드","20분"],["SGQ","반박 문항 출제·상호 풀이","12분"],["POL","사후 입장 조사","3분",{q:"토론 후, 나의 입장은?",choices:["찬성","중립","반대"]}],["EXT","Exit Ticket","자동"]] },
   "TBL": { desc: "개인(iRAT)·팀(tRAT) 준비도 확인 후 적용 (팀기반학습)", blocks: [["QZS","iRAT 개인 준비도 확인","수업 전"],["QZG","tRAT 팀 준비도 확인","15분"],["BRD","적용 과제 팀 활동","30분"],["EXT","Exit Ticket","자동"]] },
-  "강의 중심": { desc: "신호등 상시 가동 + 중간 점검으로 페이스 조절", blocks: [["POL","도입 질문","3분"],["QZG","중간 점검 퀴즈","10분"],["EXT","Exit Ticket","자동"]] },
+  "강의 중심": { desc: "신호등 상시 가동 + 중간 점검으로 페이스 조절", blocks: [["POL","도입 질문","3분",{q:"오늘 주제, 미리 접해본 적 있나요?",choices:["잘 안다","들어봤다","처음이다"]}],["QZG","중간 점검 퀴즈","10분"],["EXT","Exit Ticket","자동"]] },
 };
-const tplBlocks = name => FLOW_TEMPLATES[name].blocks.map(([type, title, dur]) => ({ id: uid(), type, title, dur }));
+const tplBlocks = name => FLOW_TEMPLATES[name].blocks.map(([type, title, dur, poll]) => ({ id: uid(), type, title, dur, ...(poll ? { poll } : {}) }));
 
 /* ---------- 내장 QR 렌더러 ---------- */
 function QRSvg({ text, size = 170 }) {
@@ -2369,6 +2369,7 @@ function App() {
   const [flows, setFlows] = useState({});
   const [questionSets, setQuestionSets] = useState({});
   const [session, setSession] = useState(null); // 플로우 러너 {flowId, step}
+  const [poll, setPoll] = useState(null); // 즉석 투표 상태
   const [connected, setConnected] = useState(null);
   const [offset, setOffset] = useState(0);
   const serverNow = () => Date.now() + offset;
@@ -2385,6 +2386,7 @@ function App() {
       [R("flows"), s => setFlows(s.val() || {})],
       [R("questionSets"), s => setQuestionSets(s.val() || {})],
       [R("session"), s => setSession(s.val())],
+      [R("poll"), s => setPoll(s.val())],
       [db.ref(".info/connected"), s => setConnected(!!s.val())],
       [db.ref(".info/serverTimeOffset"), s => setOffset(s.val() || 0)],
     ];
@@ -2418,6 +2420,7 @@ function App() {
   const [exitForm, setExitForm] = useState({ scale: 0, concept: "", open: "" });
   const [newQ, setNewQ] = useState(null); // 문항 직접 추가 폼
   const [editBlock, setEditBlock] = useState(null); // 플로우 블록 편집
+  const [pollDraft, setPollDraft] = useState(null); // 투표 만들기 폼
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
   const notify = m => { setToast(m); setTimeout(() => setToast(null), 2600); };
   const askText = (title, desc, initial, placeholder, ok) => setDlg({ mode: "prompt", title, desc, value: initial || "", placeholder, ok });
@@ -2568,9 +2571,28 @@ function App() {
   };
   const blockSave = () => {
     if (!editBlock.title.trim()) return notify("활동 제목을 입력해 주세요.");
-    setBlocks(activeFlow.blocks.map(x => x.id === editBlock.id ? { ...x, title: editBlock.title.trim(), dur: editBlock.dur.trim() || "10분", ...(editBlock.setId !== undefined ? { setId: editBlock.setId } : {}) } : x));
+    const pollData = (editBlock.pollQ || "").trim() ? { poll: { q: editBlock.pollQ.trim(), choices: (editBlock.pollC || "").split("\n").map(c => c.trim()).filter(Boolean).slice(0, 5) } } : {};
+    setBlocks(activeFlow.blocks.map(x => x.id === editBlock.id ? { ...x, title: editBlock.title.trim(), dur: editBlock.dur.trim() || "10분", ...(editBlock.setId !== undefined ? { setId: editBlock.setId } : {}), ...pollData } : x));
     setEditBlock(null);
   };
+
+  /* ---------- 즉석 투표 (POL) ---------- */
+  const pollVotes = (poll && poll.votes) || {};
+  const myPollVote = pollVotes[me.id];
+  const pollCounts = poll ? (poll.options || []).map((_, i) => Object.values(pollVotes).filter(v => v === i).length) : [];
+  const pollTotal = Object.keys(pollVotes).length;
+  const startPoll = () => {
+    const q = pollDraft.q.trim();
+    const opts = pollDraft.options.map(o => o.trim()).filter(Boolean);
+    if (!q) return notify("투표 질문을 입력해 주세요.");
+    if (opts.length < 2) return notify("보기를 2개 이상 입력해 주세요.");
+    R("poll").set({ q, options: opts, status: "open", createdAt: serverNow() });
+    setPollDraft(null); notify("투표가 시작되었습니다. 학생 화면에 바로 표시됩니다.");
+  };
+  const votePoll = i => { if (poll?.status === "open") R("poll/votes/" + me.id).set(i); };
+  const closePoll = () => R("poll/status").set("closed");
+  const deletePoll = () => askConfirm("투표 삭제", "이 투표와 응답을 지울까요?", () => R("poll").remove());
+  const POLL_SCALE = ["매우 쉬웠어요", "적당했어요", "어려웠어요", "매우 어려웠어요"];
 
   /* ---------- 플로우 러너 ---------- */
   const runFlow = session && flows?.[session.flowId] ? { id: session.flowId, ...flows[session.flowId], blocks: flows[session.flowId].blocks || [] } : null;
@@ -2674,6 +2696,7 @@ function App() {
             {isInstructor ? (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {(runBlock.type === "QZG" || runBlock.type === "QZS") && <Btn sm onClick={openStepQuiz} style={{ borderColor: "#fff" }}>▶ 이 단계 퀴즈 열기</Btn>}
+                {runBlock.type === "POL" && <Btn sm onClick={() => { setPollDraft({ q: (runBlock.poll && runBlock.poll.q) || runBlock.title, options: (runBlock.poll && runBlock.poll.choices) ? [...runBlock.poll.choices] : [...POLL_SCALE] }); setTab("signal"); }} style={{ borderColor: "#fff" }}>📊 이 단계 투표 열기</Btn>}
                 {runBlock.type === "EXT" && <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>Exit 결과 보기</Btn>}
                 <Btn sm onClick={nextStep} style={{ borderColor: "#fff" }}>{session.step + 1 >= runFlow.blocks.length ? "수업 종료" : "다음 단계 →"}</Btn>
                 <Btn sm onClick={endFlowSession} style={{ borderColor: "#fff", marginLeft: "auto" }}>종료</Btn>
@@ -2682,6 +2705,8 @@ function App() {
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 {(runBlock.type === "QZG" || runBlock.type === "QZS") && quiz.status !== "idle"
                   ? <Btn sm onClick={() => setTab("quiz")} style={{ borderColor: "#fff" }}>▶ 퀴즈 참여하기</Btn>
+                  : runBlock.type === "POL" && poll?.status === "open"
+                  ? <Btn sm onClick={() => setTab("signal")} style={{ borderColor: "#fff" }}>📊 투표 참여하기</Btn>
                   : runBlock.type === "EXT"
                   ? <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>⏻ Exit Ticket 제출하기</Btn>
                   : <span style={{ fontSize: 12, opacity: .85 }}>교수님 안내에 따라 활동을 진행해 주세요 (이해도는 🚦 신호등으로!)</span>}
@@ -2794,6 +2819,13 @@ function App() {
                             <input value={editBlock.title} onChange={e => setEditBlock(s => ({ ...s, title: e.target.value }))} placeholder="활동 제목" className="inp" style={{ flex: 2 }} />
                             <input value={editBlock.dur} onChange={e => setEditBlock(s => ({ ...s, dur: e.target.value }))} placeholder="시간 (예: 10분)" className="inp" style={{ flex: 1 }} />
                           </div>
+                          {activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "POL" && (
+                            <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              <div style={{ fontSize: 11, color: "#787b82" }}>📊 투표 질문·보기 (블록 저장 — 수업 중 [이 단계 투표 열기] 시 자동 입력됩니다)</div>
+                              <input value={editBlock.pollQ || ""} onChange={e => setEditBlock(s => ({ ...s, pollQ: e.target.value }))} placeholder="투표 질문 (예: 사전학습, 해보니 어땠나요?)" className="inp" />
+                              <textarea rows={3} value={editBlock.pollC || ""} onChange={e => setEditBlock(s => ({ ...s, pollC: e.target.value }))} placeholder="보기를 한 줄에 하나씩 (2~5개)" className="inp" style={{ resize: "vertical" }} />
+                            </div>
+                          )}
                           {(activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "QZG" || activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "QZS") && (
                             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                               <span style={{ fontSize: 11.5, color: "#787b82", whiteSpace: "nowrap" }}>🔗 연동 문항 세트</span>
@@ -2811,8 +2843,8 @@ function App() {
                       ) : (
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: "#0E6B5B", fontWeight: 700, minWidth: 30 }}>{f.type}</span>
-                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span>{f.setId && questionSets?.[f.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[f.setId].name}</span>}</span>
-                          <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur, setId: f.setId || "" })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
+                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span>{f.setId && questionSets?.[f.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[f.setId].name}</span>}{f.type === "POL" && f.poll && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 📊{f.poll.q}</span>}</span>
+                          <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur, setId: f.setId || "", pollQ: (f.poll && f.poll.q) || "", pollC: ((f.poll && f.poll.choices) || []).join("\n") })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
                           <button onClick={() => blockMove(i, -1)} disabled={i === 0} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === 0 ? .25 : 1 }} aria-label="위로">↑</button>
                           <button onClick={() => blockMove(i, 1)} disabled={i === activeFlow.blocks.length - 1} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === activeFlow.blocks.length - 1 ? .25 : 1 }} aria-label="아래로">↓</button>
                           <button onClick={() => blockDel(f.id)} style={{ border: "none", background: "none", color: "#b3402a", fontSize: 13, cursor: "pointer" }} aria-label="삭제">✕</button>
@@ -3023,6 +3055,82 @@ function App() {
         {/* ==================== SIGNAL ==================== */}
         {tab === "signal" && (
           <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* ----- 즉석 투표 (POL) ----- */}
+            {isInstructor ? (
+              <Card>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <Label>📊 즉석 투표</Label>
+                  {!poll && !pollDraft && <Btn sm onClick={() => setPollDraft({ q: "", options: ["", "", "", ""] })}>+ 투표 만들기</Btn>}
+                </div>
+                {poll ? (
+                  <div>
+                    <div style={{ fontSize: 13.5, fontWeight: 900, marginBottom: 8 }}>{poll.q} <span style={{ fontSize: 11, color: poll.status === "open" ? "#0E6B5B" : "#787b82", fontWeight: 700 }}>{poll.status === "open" ? "· 진행 중" : "· 마감됨"}</span></div>
+                    {(poll.options || []).map((o, i) => {
+                      const pct = pollTotal ? Math.round(pollCounts[i] / pollTotal * 100) : 0;
+                      return (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12.5 }}>
+                          <span style={{ minWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o}</span>
+                          <div style={{ flex: 1, height: 14, background: "#e7e5dc", borderRadius: 4, overflow: "hidden" }}><div style={{ width: pct + "%", height: "100%", background: "#0E6B5B", transition: "width .4s" }} /></div>
+                          <span style={{ fontFamily: "monospace", fontSize: 11.5, minWidth: 66, textAlign: "right" }}>{pct}% ({pollCounts[i]})</span>
+                        </div>
+                      );
+                    })}
+                    <div style={{ fontSize: 11, color: "#787b82", margin: "4px 0 8px" }}>응답 {pollTotal}명 · 학생에게는 마감 후 결과가 공개됩니다</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {poll.status === "open" ? <Btn pri sm onClick={closePoll}>마감 · 결과 공개</Btn> : <Btn sm onClick={() => setPollDraft({ q: poll.q, options: [...poll.options] })}>같은 질문으로 재투표</Btn>}
+                      <Btn sm onClick={deletePoll} style={{ color: "#b3402a" }}>삭제</Btn>
+                    </div>
+                  </div>
+                ) : pollDraft ? (
+                  <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <input value={pollDraft.q} onChange={e => setPollDraft(s => ({ ...s, q: e.target.value }))} placeholder="투표 질문 (예: 사전학습 난이도는 어땠나요?)" className="inp" />
+                    {pollDraft.options.map((o, i) => (
+                      <input key={i} value={o} onChange={e => setPollDraft(s => ({ ...s, options: s.options.map((x, j) => j === i ? e.target.value : x) }))} placeholder={"보기 " + (i + 1) + (i >= 2 ? " (선택)" : "")} className="inp" />
+                    ))}
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      <Btn pri sm onClick={startPoll}>투표 시작</Btn>
+                      <Btn sm onClick={() => setPollDraft(s => ({ ...s, options: [...POLL_SCALE] }))}>난이도 4단계 채우기</Btn>
+                      <Btn sm onClick={() => setPollDraft(null)}>취소</Btn>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12.5, color: "#a9aca7" }}>진행 중인 투표가 없습니다. 플로우의 POL 단계에서 [투표 열기]를 누르면 질문이 자동으로 채워집니다.</div>
+                )}
+              </Card>
+            ) : (
+              poll && (
+                <Card>
+                  <Label>📊 즉석 투표{poll.status === "closed" ? " · 결과" : ""}</Label>
+                  <div style={{ fontSize: 13.5, fontWeight: 900, marginBottom: 8 }}>{poll.q}</div>
+                  {poll.status === "open" ? (
+                    <div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {(poll.options || []).map((o, i) => (
+                          <button key={i} onClick={() => votePoll(i)}
+                            style={{ border: "2px solid " + (myPollVote === i ? "#0E6B5B" : "#d8d6cc"), background: myPollVote === i ? "#e7f3ee" : "#fff", borderRadius: 10, padding: "12px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                            {myPollVote === i ? "● " : "○ "}{o}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6, textAlign: "center" }}>익명 투표 · 마감 전까지 변경 가능 · 응답 {pollTotal}명</div>
+                    </div>
+                  ) : (
+                    <div>
+                      {(poll.options || []).map((o, i) => {
+                        const pct = pollTotal ? Math.round(pollCounts[i] / pollTotal * 100) : 0;
+                        return (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12.5, fontWeight: myPollVote === i ? 900 : 400 }}>
+                            <span style={{ minWidth: 110 }}>{myPollVote === i ? "✓ " : ""}{o}</span>
+                            <div style={{ flex: 1, height: 14, background: "#e7e5dc", borderRadius: 4, overflow: "hidden" }}><div style={{ width: pct + "%", height: "100%", background: "#0E6B5B" }} /></div>
+                            <span style={{ fontFamily: "monospace", fontSize: 11.5, minWidth: 40, textAlign: "right" }}>{pct}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Card>
+              )
+            )}
             {!isInstructor ? (
               <Card>
                 <Label>지금 강의, 어느 정도 이해되나요? (익명 집계)</Label>
