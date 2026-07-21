@@ -11,7 +11,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.full.min.js"
-  onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';document.head.appendChild(s);"></script>
+  onerror="var s=document.createElement('script');s.src='https://unpkg.com/xlsx-js-style@1.2.0/dist/xlsx.full.min.js';s.onerror=function(){window.__XLSX_PLAIN=1;var t=document.createElement('script');t.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';document.head.appendChild(t);};document.head.appendChild(s);"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#EDECE5}
@@ -2297,7 +2297,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.4";
+const APP_VERSION = "LIVE 2.5";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■"];
@@ -2336,6 +2336,15 @@ function QRSvg({ text, size = 170 }) {
   } catch { return <div style={{ fontSize: 12, color: "#b3402a" }}>QR 생성 실패</div>; }
 }
 
+const XL_BORDER = { top: { style: "thin", color: { rgb: "C9CED6" } }, bottom: { style: "thin", color: { rgb: "C9CED6" } }, left: { style: "thin", color: { rgb: "C9CED6" } }, right: { style: "thin", color: { rgb: "C9CED6" } } };
+const xlBorder = (ws, fromRow = 0) => {
+  if (!ws["!ref"]) return;
+  const R = XLSX.utils.decode_range(ws["!ref"]);
+  for (let r = Math.max(fromRow, R.s.r); r <= R.e.r; r++) for (let c = R.s.c; c <= R.e.c; c++) {
+    const cell = ws[XLSX.utils.encode_cell({ r, c })];
+    if (cell) cell.s = { ...(cell.s || {}), border: XL_BORDER };
+  }
+};
 const Dot = ({ st }) => st === "f"
   ? <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", border: "1.5px dashed #b4b2a9" }} />
   : <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: st === "g" ? "#1D9E75" : st === "a" ? "#EF9F27" : "#D9D7CD" }} />;
@@ -2695,38 +2704,120 @@ function App() {
   const histList = Object.entries(quizHist || {}).map(([id, h]) => ({ id, ...h })).sort((x, y) => (x.endedAt || 0) - (y.endedAt || 0));
   const exportWeekExcel = () => {
     if (typeof XLSX === "undefined") return notify("⚠ Excel 라이브러리를 아직 불러오지 못했습니다 — 잠시 후 다시 시도하거나 페이지를 새로고침해 주세요.");
+    if (window.__XLSX_PLAIN) notify("⚠ 예비 라이브러리로 동작 중 — 색상 서식 없이 생성됩니다.");
     try {
+      const addr = (r, c) => XLSX.utils.encode_cell({ r, c });
+      const ST = {
+        title: { font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0E6B5B" } }, alignment: { vertical: "center" } },
+        head: { font: { bold: true, color: { rgb: "085041" } }, fill: { fgColor: { rgb: "E1F5EE" } }, alignment: { horizontal: "center" } },
+        O: { font: { bold: true, color: { rgb: "173404" } }, fill: { fgColor: { rgb: "C6EFCE" } }, alignment: { horizontal: "center" } },
+        X: { font: { bold: true, color: { rgb: "791F1F" } }, fill: { fgColor: { rgb: "FFC7CE" } }, alignment: { horizontal: "center" } },
+        g: { font: { bold: true, color: { rgb: "173404" } }, fill: { fgColor: { rgb: "C6EFCE" } }, alignment: { horizontal: "center" } },
+        y: { font: { bold: true, color: { rgb: "633806" } }, fill: { fgColor: { rgb: "FAEEDA" } }, alignment: { horizontal: "center" } },
+        r: { font: { bold: true, color: { rgb: "791F1F" } }, fill: { fgColor: { rgb: "FFC7CE" } }, alignment: { horizontal: "center" } },
+        zebra: { fill: { fgColor: { rgb: "FAFAF7" } } },
+        badge: { font: { bold: true, color: { rgb: "085041" } }, fill: { fgColor: { rgb: "E1F5EE" } }, alignment: { horizontal: "center" } },
+        center: { alignment: { horizontal: "center" } },
+      };
+      const sheetTitle = (ws, text, span) => {
+        const cell = ws[addr(0, 0)]; if (cell) cell.s = ST.title;
+        ws["!merges"] = (ws["!merges"] || []).concat([{ s: { r: 0, c: 0 }, e: { r: 0, c: span - 1 } }]);
+        ws["!rows"] = [{ hpt: 24 }];
+      };
+      const zebraCols = (ws, dataStart, rows, cols, skip) => {
+        for (let r = 0; r < rows; r++) { if (r % 2 === 0) continue;
+          for (let c = 0; c < cols; c++) { if (skip && skip.includes(c)) continue;
+            const cell = ws[addr(dataStart + r, c)];
+            if (cell && !cell.s) cell.s = ST.zebra;
+          }
+        }
+      };
       const wb = XLSX.utils.book_new();
-      // 시트 1: 퀴즈 기록 (개인×문항)
-      const quizRows = [["주차", "퀴즈", "성적반영", "표시이름", "문항번호", "문항", "선택", "정답", "정답여부"]];
+
+      /* --- 시트 1: 퀴즈 기록 --- */
+      const qRows = [[weekLabel(W) + "차 활동 리포트 — 퀴즈 기록", "", "", "", "", "", "", ""],
+        ["퀴즈", "성적반영", "표시이름", "Q", "문항", "선택한 답", "정답", "결과"]];
+      const oxPos = [];
       histList.forEach(h => {
         const qs = h.questions || [];
         Object.entries(h.answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, ans]) => {
           const q = qs[qi] || {};
-          quizRows.push([W, h.setName, h.graded ? "Y" : "N", (h.players || {})[pid] || pid,
-            Number(qi) + 1, q.q || "", (q.choices || [])[ans.choice] || "", (q.choices || [])[q.answer] || "",
-            ans.choice === q.answer ? "O" : "X"]);
+          const ok = ans.choice === q.answer;
+          oxPos.push([qRows.length, ok ? "O" : "X", !!h.graded]);
+          qRows.push([h.setName, h.graded ? "🎯 반영" : "-", (h.players || {})[pid] || pid, Number(qi) + 1,
+            q.q || "", (q.choices || [])[ans.choice] || "", (q.choices || [])[q.answer] || "", ok ? "O" : "X"]);
         }));
       });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(quizRows), "퀴즈기록");
-      // 시트 2: 신호등
-      const sigRows = [["표시이름", "신호", "시각"]];
-      Object.values(signals || {}).forEach(s => sigRows.push([s.nick || "", s.v === "g" ? "이해됨" : s.v === "y" ? "애매함" : "모르겠음", new Date(s.ts).toLocaleString("ko-KR")]));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sigRows), "신호등");
-      // 시트 3: 익명 질문
-      const qRows = [["질문", "공감수", "시각"]];
-      Object.values(questionsQ || {}).forEach(q => qRows.push([q.text || "", Object.keys(q.votes || {}).length, new Date(q.ts).toLocaleString("ko-KR")]));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(qRows), "익명질문");
-      // 시트 4: Exit Ticket
-      const eRows = [["표시이름", "이해도(1-5)", "핵심개념", "궁금한점", "제출시각"]];
-      Object.values(exitR || {}).forEach(r => eRows.push([r.nick || "", r.scale || "", r.concept || "", r.open || "", new Date(r.ts).toLocaleString("ko-KR")]));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(eRows), "ExitTicket");
-      XLSX.writeFile(wb, "ClassPulse_" + W + "주차_활동.xlsx");
-      notify(W + "주차 활동 Excel이 다운로드됩니다.");
+      if (qRows.length === 2) qRows.push(["기록 없음", "", "", "", "", "", "", ""]);
+      const ws1 = XLSX.utils.aoa_to_sheet(qRows);
+      sheetTitle(ws1, qRows[0][0], 8);
+      for (let c = 0; c < 8; c++) { const cell = ws1[addr(1, c)]; if (cell) cell.s = ST.head; }
+      oxPos.forEach(([r, v, graded]) => {
+        const res = ws1[addr(r, 7)]; if (res) res.s = v === "O" ? ST.O : ST.X;
+        const gd = ws1[addr(r, 1)]; if (gd) gd.s = graded ? ST.badge : ST.center;
+        const qn = ws1[addr(r, 3)]; if (qn) qn.s = ST.center;
+      });
+      zebraCols(ws1, 2, qRows.length - 2, 8, [1, 3, 7]);
+      ws1["!cols"] = [{ wch: 16 }, { wch: 9 }, { wch: 18 }, { wch: 4 }, { wch: 38 }, { wch: 20 }, { wch: 20 }, { wch: 6 }];
+      xlBorder(ws1, 1);
+      XLSX.utils.book_append_sheet(wb, ws1, "퀴즈기록");
+
+      /* --- 시트 2: 신호등 --- */
+      const sMap = { g: ["이해됨", "g"], y: ["애매함", "y"], r: ["모르겠음", "r"] };
+      const sRows = [[weekLabel(W) + "차 활동 리포트 — 이해도 신호등", "", ""], ["표시이름", "신호", "시각"]];
+      const sPos = [];
+      Object.values(signals || {}).forEach(s => {
+        sPos.push([sRows.length, (sMap[s.v] || ["?", "y"])[1]]);
+        sRows.push([s.nick || "", (sMap[s.v] || ["?"])[0], new Date(s.ts).toLocaleString("ko-KR")]);
+      });
+      if (sRows.length === 2) sRows.push(["기록 없음", "", ""]);
+      const ws2 = XLSX.utils.aoa_to_sheet(sRows);
+      sheetTitle(ws2, sRows[0][0], 3);
+      for (let c = 0; c < 3; c++) { const cell = ws2[addr(1, c)]; if (cell) cell.s = ST.head; }
+      sPos.forEach(([r, k]) => { const cell = ws2[addr(r, 1)]; if (cell) cell.s = ST[k]; });
+      zebraCols(ws2, 2, sRows.length - 2, 3, [1]);
+      ws2["!cols"] = [{ wch: 18 }, { wch: 10 }, { wch: 22 }];
+      xlBorder(ws2, 1);
+      XLSX.utils.book_append_sheet(wb, ws2, "신호등");
+
+      /* --- 시트 3: 익명 질문 --- */
+      const aRows = [[weekLabel(W) + "차 활동 리포트 — 익명 질문", "", ""], ["질문", "공감수", "시각"]];
+      Object.values(questionsQ || {}).sort((a, b) => Object.keys(b.votes || {}).length - Object.keys(a.votes || {}).length)
+        .forEach(q => aRows.push([q.text || "", Object.keys(q.votes || {}).length, new Date(q.ts).toLocaleString("ko-KR")]));
+      if (aRows.length === 2) aRows.push(["기록 없음", "", ""]);
+      const ws3 = XLSX.utils.aoa_to_sheet(aRows);
+      sheetTitle(ws3, aRows[0][0], 3);
+      for (let c = 0; c < 3; c++) { const cell = ws3[addr(1, c)]; if (cell) cell.s = ST.head; }
+      for (let r = 2; r < aRows.length; r++) { const cell = ws3[addr(r, 1)]; if (cell) cell.s = { font: { bold: true, color: { rgb: "0F6E56" } }, alignment: { horizontal: "center" } }; }
+      zebraCols(ws3, 2, aRows.length - 2, 3, [1]);
+      ws3["!cols"] = [{ wch: 52 }, { wch: 8 }, { wch: 22 }];
+      xlBorder(ws3, 1);
+      XLSX.utils.book_append_sheet(wb, ws3, "익명질문");
+
+      /* --- 시트 4: Exit Ticket --- */
+      const eRows = [[weekLabel(W) + "차 활동 리포트 — Exit Ticket", "", "", "", ""], ["표시이름", "이해도(1-5)", "핵심개념", "궁금한점", "제출시각"]];
+      const ePos = [];
+      Object.values(exitR || {}).forEach(r0 => {
+        ePos.push([eRows.length, r0.scale >= 4 ? "g" : r0.scale === 3 ? "y" : "r"]);
+        eRows.push([r0.nick || "", r0.scale || "", r0.concept || "", r0.open || "", new Date(r0.ts).toLocaleString("ko-KR")]);
+      });
+      if (eRows.length === 2) eRows.push(["기록 없음", "", "", "", ""]);
+      const ws4 = XLSX.utils.aoa_to_sheet(eRows);
+      sheetTitle(ws4, eRows[0][0], 5);
+      for (let c = 0; c < 5; c++) { const cell = ws4[addr(1, c)]; if (cell) cell.s = ST.head; }
+      ePos.forEach(([r, k]) => { const cell = ws4[addr(r, 1)]; if (cell) cell.s = ST[k]; });
+      zebraCols(ws4, 2, eRows.length - 2, 5, [1]);
+      ws4["!cols"] = [{ wch: 18 }, { wch: 10 }, { wch: 16 }, { wch: 44 }, { wch: 22 }];
+      xlBorder(ws4, 1);
+      XLSX.utils.book_append_sheet(wb, ws4, "ExitTicket");
+
+      XLSX.writeFile(wb, "ClassPulse_" + W + "주차_활동리포트.xlsx");
+      notify(W + "주차 활동 리포트 Excel이 다운로드됩니다.");
     } catch (err) { console.error(err); notify("Excel 생성 실패: " + (err && err.message ? err.message : "알 수 없는 오류")); }
   };
   const exportGradedExcel = async () => {
     if (typeof XLSX === "undefined") return notify("⚠ Excel 라이브러리를 아직 불러오지 못했습니다 — 잠시 후 다시 시도하거나 페이지를 새로고침해 주세요.");
+    if (window.__XLSX_PLAIN) notify("⚠ 예비 라이브러리로 동작 중 — 색상 서식 없이 생성됩니다.");
     try {
       notify("전체 주차 데이터를 수집하는 중…");
       const snap = await db.ref(ROOM + "/weeks").once("value");
@@ -2798,7 +2889,7 @@ function App() {
       [5, 11].forEach(r => { if (wsC[addr(r, 0)]) wsC[addr(r, 0)].s = { font: { bold: true, color: { rgb: "085041" } } }; });
       for (let c = 0; c < 5; c++) { const cell = wsC[addr(listStart - 1, c)]; if (cell) cell.s = ST.head; }
       wsC["!cols"] = [{ wch: 18 }, { wch: 26 }, { wch: 8 }, { wch: 7 }, { wch: 9 }];
-      XLSX.utils.book_append_sheet(wb, wsC, "표지요약");
+      xlBorder(wsC, 12); XLSX.utils.book_append_sheet(wb, wsC, "표지요약");
 
       /* ===== ② 성적표 (병합 헤더 · O/X · 석차 · 등급 · 막대) ===== */
       const head0 = ["표시이름"]; const head1 = [""];
@@ -2862,7 +2953,7 @@ function App() {
       }
       wsG["!cols"] = [{ wch: 18 }, ...Array.from({ length: totalQ }, () => ({ wch: 5 })), { wch: 6 }, { wch: 7 }, { wch: 5 }, { wch: 5 }, { wch: 12 }];
       wsG["!rows"] = [{ hpt: 22 }, { hpt: 16 }];
-      XLSX.utils.book_append_sheet(wb, wsG, "성적표");
+      xlBorder(wsG, 0); XLSX.utils.book_append_sheet(wb, wsG, "성적표");
 
       /* ===== ③ 문항 분석 (난이도 색 + 오답지 매력도) ===== */
       const maxC = Math.max(...G.map(g => Math.max(...g.questions.map(q => (q.choices || []).length), 0)), 4);
@@ -2888,7 +2979,7 @@ function App() {
       for (let c = 0; c < qHead.length; c++) { const cell = wsQ[addr(0, c)]; if (cell) cell.s = ST.head; }
       qStyles.forEach(([r, c, k]) => { const cell = wsQ[addr(r, c)]; if (cell) cell.s = ST[k]; });
       wsQ["!cols"] = [{ wch: 5 }, { wch: 14 }, { wch: 4 }, { wch: 42 }, { wch: 16 }, { wch: 7 }, { wch: 8 }, ...Array.from({ length: maxC }, () => ({ wch: 10 }))];
-      XLSX.utils.book_append_sheet(wb, wsQ, "문항분석");
+      xlBorder(wsQ, 0); XLSX.utils.book_append_sheet(wb, wsQ, "문항분석");
 
       /* ===== ④ 주차별 요약 (참여율) ===== */
       const maxPpl = Math.max(...G.map(g => { const p = new Set(); Object.values(g.answers).forEach(m => Object.keys(m || {}).forEach(x => p.add(x))); return p.size; }), 1);
@@ -2903,7 +2994,7 @@ function App() {
       for (let c = 0; c < 6; c++) { const cell = wsS[addr(0, c)]; if (cell) cell.s = ST.head; }
       for (let c = 0; c < 6; c++) { const cell = wsS[addr(sRows.length - 1, c)]; if (cell) cell.s = ST.avgRow; }
       wsS["!cols"] = [{ wch: 5 }, { wch: 22 }, { wch: 8 }, { wch: 9 }, { wch: 9 }, { wch: 13 }];
-      XLSX.utils.book_append_sheet(wb, wsS, "주차별요약");
+      xlBorder(wsS, 0); XLSX.utils.book_append_sheet(wb, wsS, "주차별요약");
 
       XLSX.writeFile(wb, "ClassPulse_성적리포트.xlsx");
       notify("성적 리포트 Excel(4시트)이 다운로드됩니다.");
