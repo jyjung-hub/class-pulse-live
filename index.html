@@ -10,7 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#EDECE5}
@@ -2296,7 +2296,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.0";
+const APP_VERSION = "LIVE 2.1";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■"];
@@ -2372,6 +2372,8 @@ function App() {
   const [session, setSession] = useState(null); // 플로우 러너 {flowId, step}
   const [poll, setPoll] = useState(null); // 즉석 투표 상태
   const [quizHist, setQuizHist] = useState({});
+  const [activeFlowIdW, setActiveFlowIdW] = useState(null);
+  const [semStats, setSemStats] = useState({ graded: 0, weeks: 0 });
   const [connected, setConnected] = useState(null);
   const [offset, setOffset] = useState(0);
   const serverNow = () => Date.now() + offset;
@@ -2379,7 +2381,6 @@ function App() {
   useEffect(() => {
     const subs = [
       [R("config"), s => { const v = s.val(); if (v) setConf(c => ({ ...c, ...v })); }],
-      [R("flows"), s => setFlows(s.val() || {})],
       [R("questionSets"), s => setQuestionSets(s.val() || {})],
       [db.ref(".info/connected"), s => setConnected(!!s.val())],
       [db.ref(".info/serverTimeOffset"), s => setOffset(s.val() || 0)],
@@ -2397,6 +2398,7 @@ function App() {
     // 주차 전환 시 로컬 상태 초기화 후 해당 주차 구독
     setQuiz({ status: "idle", qIndex: 0, qEndsAt: 0, timeLimit: 20, questions: SEED_QUESTIONS });
     setPlayers({}); setAnswers({}); setSignals({}); setQuestionsQ({}); setExitR({}); setSession(null); setPoll(null); setQuizHist({});
+    setFlows({}); setActiveFlowIdW(null);
     const subs = [
       [RW("quiz"), s => { const v = s.val(); if (v) setQuiz(q => ({ ...q, ...v, questions: v.questions || SEED_QUESTIONS })); }],
       [RW("players"), s => setPlayers(s.val() || {})],
@@ -2407,6 +2409,8 @@ function App() {
       [RW("session"), s => setSession(s.val())],
       [RW("poll"), s => setPoll(s.val())],
       [RW("quizHistory"), s => setQuizHist(s.val() || {})],
+      [RW("flows"), s => setFlows(s.val() || {})],
+      [RW("activeFlowId"), s => setActiveFlowIdW(s.val())],
     ];
     subs.forEach(([ref, cb]) => ref.on("value", cb));
     return () => subs.forEach(([ref, cb]) => ref.off("value", cb));
@@ -2444,6 +2448,20 @@ function App() {
   const askText = (title, desc, initial, placeholder, ok) => setDlg({ mode: "prompt", title, desc, value: initial || "", placeholder, ok });
   const askConfirm = (title, desc, ok) => setDlg({ mode: "confirm", title, desc, ok });
   const isInstructor = role === "instructor" && instructorOk;
+  useEffect(() => { // 교수자 홈 진입 시 학기 통계 집계
+    if (!(isInstructor && tab === "home")) return;
+    db.ref(ROOM + "/weeks").once("value").then(s => {
+      const weeks = s.val() || {};
+      let g = 0, act = 0;
+      Object.values(weeks).forEach(wk => {
+        const hist = wk.quizHistory || {};
+        const hasAct = Object.keys(hist).length || Object.keys(wk.exit || {}).length || Object.keys(wk.signals || {}).length;
+        if (hasAct) act++;
+        Object.values(hist).forEach(h => { if (h.graded) g++; });
+      });
+      setSemStats({ graded: g, weeks: act });
+    }).catch(() => {});
+  }, [isInstructor, tab, W]);
   const renameMe = () => askText("표시이름 설정", "성적 반영 퀴즈에서는 학번+이름(예: 20261234 홍길동)으로 설정해 주세요.", me.nick, "표시이름", v => {
     if (!v.trim()) { notify("표시이름을 입력해 주세요."); return false; }
     const next = { ...me, nick: v.trim() };
@@ -2564,37 +2582,37 @@ function App() {
 
   /* ---------- 플로우 관리 (E-1 · E-2) ---------- */
   const flowList = Object.entries(flows || {}).map(([id, f]) => ({ id, ...f, blocks: f.blocks || [] })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-  const activeFlow = flowList.find(f => f.id === conf.activeFlowId) || flowList[0] || { id: "", name: "플로우 없음", method: "-", blocks: [] };
-  const setActiveFlow = id => R("config/activeFlowId").set(id);
+  const activeFlow = flowList.find(f => f.id === activeFlowIdW) || flowList[0] || { id: "", name: "플로우 없음", method: "-", blocks: [] };
+  const setActiveFlow = id => RW("activeFlowId").set(id);
   const newFlowFromTemplate = name => {
     const id = uid();
-    R("flows/" + id).set({ name: name + " 플로우", method: name, blocks: tplBlocks(name), createdAt: serverNow() });
+    RW("flows/" + id).set({ name: name + " 플로우", method: name, blocks: tplBlocks(name), createdAt: serverNow() });
     setActiveFlow(id); notify("'" + name + "' 템플릿으로 새 플로우를 만들었습니다.");
   };
   const newFlowEmpty = () => askText("새 플로우 만들기", "플로우 이름을 입력하세요.", "새 수업 플로우", "플로우 이름", v => {
     if (!v.trim()) { notify("이름을 입력해 주세요."); return false; }
     const id = uid();
-    R("flows/" + id).set({ name: v.trim(), method: "직접 설계", blocks: [], createdAt: serverNow() });
+    RW("flows/" + id).set({ name: v.trim(), method: "직접 설계", blocks: [], createdAt: serverNow() });
     setActiveFlow(id);
   });
   const renameFlow = () => askText("플로우 이름 변경", null, activeFlow.name, "플로우 이름", v => {
     if (!v.trim()) { notify("이름을 입력해 주세요."); return false; }
-    R("flows/" + activeFlow.id + "/name").set(v.trim());
+    RW("flows/" + activeFlow.id + "/name").set(v.trim());
   });
   const dupFlow = () => {
     const id = uid();
-    R("flows/" + id).set({ name: activeFlow.name + " (복사)", method: activeFlow.method, blocks: activeFlow.blocks.map(b => ({ ...b, id: uid() })), createdAt: serverNow() });
+    RW("flows/" + id).set({ name: activeFlow.name + " (복사)", method: activeFlow.method, blocks: activeFlow.blocks.map(b => ({ ...b, id: uid() })), createdAt: serverNow() });
     setActiveFlow(id); notify("플로우가 복제되었습니다.");
   };
   const delFlow = () => {
     if (flowList.length <= 1) return notify("플로우는 최소 1개가 필요합니다.");
     askConfirm("플로우 삭제", "'" + activeFlow.name + "' 플로우를 삭제할까요? 되돌릴 수 없습니다.", () => {
       const rest = flowList.filter(f => f.id !== activeFlow.id);
-      R("flows/" + activeFlow.id).remove();
+      RW("flows/" + activeFlow.id).remove();
       setActiveFlow(rest[0].id);
     });
   };
-  const setBlocks = b => R("flows/" + activeFlow.id + "/blocks").set(b);
+  const setBlocks = b => RW("flows/" + activeFlow.id + "/blocks").set(b);
   const blockAdd = type => setBlocks([...activeFlow.blocks, { id: uid(), type, title: ACT_TYPES[type], dur: "10분", ...((type === "QZG" || type === "QZS") && currentSetId ? { setId: currentSetId } : {}) }]);
   const blockDel = id => setBlocks(activeFlow.blocks.filter(x => x.id !== id));
   const blockMove = (i, dir) => {
@@ -2681,47 +2699,92 @@ function App() {
       notify("전체 주차 데이터를 수집하는 중…");
       const snap = await db.ref(ROOM + "/weeks").once("value");
       const weeks = snap.val() || {};
-      const gradedQuizzes = []; // {week, setName, questions, answers, players}
+      const G = [];
       for (let w = 1; w <= 15; w++) {
         const hist = (weeks["w" + w] || {}).quizHistory || {};
-        Object.values(hist).forEach(h => { if (h.graded) gradedQuizzes.push({ week: w, ...h, questions: h.questions || [], answers: h.answers || {}, players: h.players || {} }); });
+        Object.values(hist).forEach(h => { if (h.graded) G.push({ week: w, ...h, questions: h.questions || [], answers: h.answers || {}, players: h.players || {} }); });
       }
-      if (!gradedQuizzes.length) return notify("성적 반영으로 기록된 퀴즈가 없습니다. (퀴즈를 끝까지 진행해야 기록됩니다)");
+      if (!G.length) return notify("성적 반영으로 기록된 퀴즈가 없습니다. (퀴즈를 끝까지 진행해야 기록됩니다)");
+      G.sort((a, b) => a.week - b.week || (a.endedAt || 0) - (b.endedAt || 0));
       const wb = XLSX.utils.book_new();
-      // 시트 1: 주차별 요약
-      const sRows = [["주차", "퀴즈", "문항수", "응시인원", "평균정답률(%)"]];
-      gradedQuizzes.forEach(g => {
-        let tot = 0, cor = 0; const ppl = new Set();
-        Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
-          ppl.add(pid); tot++; if (a.choice === (g.questions[qi] || {}).answer) cor++;
-        }));
-        sRows.push([g.week, g.setName, g.questions.length, ppl.size, tot ? Math.round(cor / tot * 100) : 0]);
-      });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sRows), "주차별요약");
-      // 시트 2: 개인별 (행: 학생, 열: 각 성적반영 퀴즈 점수)
-      const ids = {}; // pid -> name
-      gradedQuizzes.forEach(g => Object.entries(g.players).forEach(([pid, n]) => { ids[pid] = n; }));
-      const cols = gradedQuizzes.map(g => g.week + "주_" + g.setName);
-      const pRows = [["표시이름", ...cols, "합계", "총문항"]];
-      const totalQ = gradedQuizzes.reduce((s, g) => s + g.questions.length, 0);
-      Object.entries(ids).forEach(([pid, name]) => {
+      const ST = {
+        head: { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0E6B5B" } }, alignment: { horizontal: "center" } },
+        O: { font: { bold: true, color: { rgb: "006100" } }, fill: { fgColor: { rgb: "C6EFCE" } }, alignment: { horizontal: "center" } },
+        X: { font: { bold: true, color: { rgb: "9C0006" } }, fill: { fgColor: { rgb: "FFC7CE" } }, alignment: { horizontal: "center" } },
+        dash: { font: { color: { rgb: "999999" } }, alignment: { horizontal: "center" } },
+        sum: { font: { bold: true }, fill: { fgColor: { rgb: "EDECE5" } } },
+        avg: { font: { bold: true, color: { rgb: "0E6B5B" } }, fill: { fgColor: { rgb: "E7F3EE" } } },
+      };
+      /* ---- 시트 1: 개인별 상세 (문항별 O/X 색상) ---- */
+      const cols = []; // {g, qi, label}
+      G.forEach(g => g.questions.forEach((q, qi) => cols.push({ g, qi, label: g.week + "주-" + g.setName + "-Q" + (qi + 1) })));
+      const ids = {};
+      G.forEach(g => Object.entries(g.players).forEach(([pid, n]) => { ids[pid] = n; }));
+      const totalQ = cols.length;
+      const aoa = [["표시이름", ...cols.map(c => c.label), "총점", "평균(%)"]];
+      const oxPos = []; // [row, col, 'O'|'X'|'-']
+      Object.entries(ids).forEach(([pid, name], ri) => {
         let sum = 0;
-        const scores = gradedQuizzes.map(g => {
-          let c = 0;
-          Object.entries(g.answers).forEach(([qi, m]) => { const a = (m || {})[pid]; if (a && a.choice === (g.questions[qi] || {}).answer) c++; });
-          sum += c; return c + "/" + g.questions.length;
+        const row = [name];
+        cols.forEach((c, ci) => {
+          const a = (c.g.answers[c.qi] || {})[pid];
+          if (a === undefined) { row.push("-"); oxPos.push([ri + 1, ci + 1, "-"]); }
+          else if (a.choice === c.g.questions[c.qi].answer) { sum++; row.push("O"); oxPos.push([ri + 1, ci + 1, "O"]); }
+          else { row.push("X"); oxPos.push([ri + 1, ci + 1, "X"]); }
         });
-        pRows.push([name, ...scores, sum, totalQ]);
+        row.push(sum, totalQ ? Math.round(sum / totalQ * 100) : 0);
+        aoa.push(row);
       });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pRows), "개인별");
-      // 시트 3: 문항별
+      const nStu = Object.keys(ids).length;
+      // 문항별 평균(정답률) 행
+      const qAvgRow = ["문항별 평균(%)"];
+      let grandT = 0, grandC = 0;
+      cols.forEach(c => {
+        const m = c.g.answers[c.qi] || {}; const n = Object.keys(m).length;
+        const cc = Object.values(m).filter(a => a.choice === c.g.questions[c.qi].answer).length;
+        grandT += n; grandC += cc;
+        qAvgRow.push(n ? Math.round(cc / n * 100) : 0);
+      });
+      const grandAvg = grandT ? Math.round(grandC / grandT * 100) : 0;
+      qAvgRow.push("", grandAvg);
+      aoa.push(qAvgRow);
+      aoa.push(["종합 평균(%) = 전체 응답 기준", ...Array(totalQ + 1).fill(""), grandAvg]);
+      const ws1 = XLSX.utils.aoa_to_sheet(aoa);
+      const addr = (r, c) => XLSX.utils.encode_cell({ r, c });
+      // 스타일 적용
+      for (let c = 0; c <= totalQ + 2; c++) { const cell = ws1[addr(0, c)]; if (cell) cell.s = ST.head; }
+      oxPos.forEach(([r, c, v]) => { const cell = ws1[addr(r, c)]; if (cell) cell.s = v === "O" ? ST.O : v === "X" ? ST.X : ST.dash; });
+      for (let r = 1; r <= nStu; r++) {
+        [totalQ + 1, totalQ + 2].forEach(c => { const cell = ws1[addr(r, c)]; if (cell) cell.s = ST.sum; });
+      }
+      for (let c = 0; c <= totalQ + 2; c++) {
+        [nStu + 1, nStu + 2].forEach(r => { const cell = ws1[addr(r, c)]; if (cell) cell.s = ST.avg; });
+      }
+      ws1["!cols"] = [{ wch: 18 }, ...cols.map(() => ({ wch: 6 })), { wch: 7 }, { wch: 9 }];
+      XLSX.utils.book_append_sheet(wb, ws1, "개인별상세");
+      /* ---- 시트 2: 주차별 요약 ---- */
+      const sRows = [["주차", "퀴즈", "문항수", "응시인원", "주차 평균 정답률(%)"]];
+      G.forEach(g => {
+        let t = 0, c = 0; const ppl = new Set();
+        Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => { ppl.add(pid); t++; if (a.choice === (g.questions[qi] || {}).answer) c++; }));
+        sRows.push([g.week, g.setName, g.questions.length, ppl.size, t ? Math.round(c / t * 100) : 0]);
+      });
+      sRows.push(["종합", "", "", "", grandAvg]);
+      const ws2 = XLSX.utils.aoa_to_sheet(sRows);
+      for (let c = 0; c < 5; c++) { const cell = ws2[addr(0, c)]; if (cell) cell.s = ST.head; }
+      for (let c = 0; c < 5; c++) { const cell = ws2[addr(sRows.length - 1, c)]; if (cell) cell.s = ST.avg; }
+      XLSX.utils.book_append_sheet(wb, ws2, "주차별요약");
+      /* ---- 시트 3: 문항별 ---- */
       const qRows = [["주차", "퀴즈", "문항번호", "문항", "정답", "응답수", "정답률(%)"]];
-      gradedQuizzes.forEach(g => g.questions.forEach((q, qi) => {
+      G.forEach(g => g.questions.forEach((q, qi) => {
         const m = g.answers[qi] || {}; const n = Object.keys(m).length;
         const c = Object.values(m).filter(a => a.choice === q.answer).length;
         qRows.push([g.week, g.setName, qi + 1, q.q, (q.choices || [])[q.answer] || "", n, n ? Math.round(c / n * 100) : 0]);
       }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(qRows), "문항별");
+      const ws3 = XLSX.utils.aoa_to_sheet(qRows);
+      for (let c = 0; c < 7; c++) { const cell = ws3[addr(0, c)]; if (cell) cell.s = ST.head; }
+      ws3["!cols"] = [{ wch: 5 }, { wch: 14 }, { wch: 8 }, { wch: 44 }, { wch: 18 }, { wch: 7 }, { wch: 10 }];
+      XLSX.utils.book_append_sheet(wb, ws3, "문항별");
       XLSX.writeFile(wb, "ClassPulse_성적반영퀴즈_종합.xlsx");
       notify("성적 반영 퀴즈 종합 Excel이 다운로드됩니다.");
     } catch (err) { console.error(err); notify("Excel 생성에 실패했습니다."); }
@@ -2779,7 +2842,7 @@ function App() {
             <div style={{ fontSize: 15, fontWeight: 900 }}>교육공학의 이해 · {weekLabel(W)}</div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 11.5, opacity: .9 }}>{me.nick}</span>
+            {!isInstructor && <span style={{ fontSize: 11.5, opacity: .9 }}>{me.nick}</span>}
             {instructorOk ? (
               <div style={{ display: "flex", border: "1.5px solid rgba(255,255,255,.6)", borderRadius: 8, overflow: "hidden", fontSize: 11.5, fontWeight: 700 }}>
                 {["student","instructor"].map(r => (
@@ -2855,11 +2918,31 @@ function App() {
                   </button>
                 ))}
               </div>
-              <Label>수업 진행 · {weekLabel(W)}</Label>
+              <Label>이번 주 현황 · {weekLabel(W)}</Label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 14 }}>
+                {[["👥", playerCount + "명", "퀴즈 접속"], ["🚦", sigCounts.total + "명", "신호 참여"], ["⏻", exitList.length + "건", "Exit 응답"], ["▶", histList.length + "건", "퀴즈 기록"]].map(([ic, v, k], i) => (
+                  <div key={i} style={{ background: "#fff", border: "1.5px solid #d8d6cc", borderRadius: 12, padding: "12px 4px", textAlign: "center" }}>
+                    <div style={{ fontSize: 15 }}>{ic}</div>
+                    <div style={{ fontSize: 17, fontWeight: 900, color: "#0E6B5B", margin: "2px 0" }}>{v}</div>
+                    <div style={{ fontSize: 10, color: "#787b82" }}>{k}</div>
+                  </div>
+                ))}
+              </div>
+              <Label>수업 진행</Label>
               <div style={{ fontSize: 12.5, color: "#55585f", marginBottom: 10 }}>참여 코드 <b style={{ fontFamily: "monospace", color: "#0E6B5B" }}>{conf.joinCode}</b> · 접속 학생 {playerCount}명 · Exit {exitList.length}건 · 활성 플로우: <b>{activeFlow.name}</b></div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <Btn pri onClick={() => { setTab("quiz"); if (quiz.status === "idle") openLobby(); }}>▶ 퀴즈 세션 시작</Btn>
                 <Btn onClick={() => setTab("analytics")}>분석 보기</Btn>
+              </div>
+            </Card>
+            <Card style={{ background: "linear-gradient(135deg,#0E6B5B 0%,#0a5246 100%)", color: "#fff", border: "none" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 900, letterSpacing: ".08em", opacity: .8, marginBottom: 6 }}>🎯 학기 성적 관리</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>
+                  성적 반영 퀴즈 누적 <b style={{ fontSize: 16 }}>{semStats.graded}</b>개 · 활동 주차 <b style={{ fontSize: 16 }}>{semStats.weeks}</b>/15주<br />
+                  <span style={{ fontSize: 11, opacity: .8 }}>개인별 O/X 색상표·총점·평균·문항별 평균 포함</span>
+                </div>
+                <Btn sm onClick={exportGradedExcel} style={{ background: "#fff", borderColor: "#fff", color: "#0E6B5B" }}>📥 종합 Excel 내려받기</Btn>
               </div>
             </Card>
             <Card>
@@ -2913,7 +2996,7 @@ function App() {
         {tab === "flow" && isInstructor && (
           <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Card>
-              <Label>내 플로우 ({flowList.length}) — 수업 유형별로 만들어 두고 골라 쓰세요</Label>
+              <Label>{weekLabel(W)}차 플로우 ({flowList.length}) — 이 주차 전용으로 관리됩니다</Label>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {flowList.map(f => {
                   const on = f.id === activeFlow.id;
@@ -3110,12 +3193,21 @@ function App() {
               )}
               {quiz.status === "ended" && (
                 <Card>
-                  <Label>최종 리더보드 (정확도 기준)</Label>
-                  {scoreboard().slice(0, 10).map((s, i) => (
-                    <div key={i} style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: "1px dashed #eceade", fontSize: 13 }}>
-                      <span style={{ fontWeight: 900, minWidth: 28 }}>{i+1}위</span><span style={{ flex: 1 }}>{s.nick}</span><span style={{ fontFamily: "monospace" }}>{s.correct}/{quiz.questions.length}</span>
-                    </div>
-                  ))}
+                  <Label>최종 리더보드 (정확도 기준){quiz.graded ? " · 🎯 성적 반영" : ""}</Label>
+                  {scoreboard().slice(0, 10).map((s, i) => {
+                    const pct = quiz.questions.length ? Math.round(s.correct / quiz.questions.length * 100) : 0;
+                    const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "위";
+                    return (
+                      <div key={i} className="fade" style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px dashed #eceade", fontSize: 13 }}>
+                        <span style={{ fontWeight: 900, minWidth: 34, fontSize: i < 3 ? 17 : 13 }}>{medal}</span>
+                        <span style={{ minWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: i < 3 ? 900 : 400 }}>{s.nick}</span>
+                        <div style={{ flex: 1, height: 16, background: "#e7e5dc", borderRadius: 8, overflow: "hidden" }}>
+                          <div style={{ width: pct + "%", height: "100%", background: i === 0 ? "#0E6B5B" : i < 3 ? "#4a9080" : "#8aa39c", transition: "width .6s" }} />
+                        </div>
+                        <span style={{ fontFamily: "monospace", minWidth: 56, textAlign: "right" }}>{s.correct}/{quiz.questions.length}</span>
+                      </div>
+                    );
+                  })}
                   <div style={{ display: "flex", gap: 6, marginTop: 12 }}><Btn onClick={endQuiz}>닫기</Btn><Btn onClick={() => setTab("analytics")}>문항 분석 →</Btn></div>
                 </Card>
               )}
@@ -3180,11 +3272,20 @@ function App() {
               {quiz.status === "ended" && (
                 <Card>
                   <Label>최종 결과</Label>
-                  {scoreboard().slice(0, 5).map((s, i) => (
-                    <div key={i} style={{ display: "flex", gap: 10, padding: "6px 0", fontSize: 13, fontWeight: s.nick === me.nick ? 900 : 400, color: s.nick === me.nick ? "#0E6B5B" : undefined }}>
-                      <span style={{ minWidth: 28 }}>{i+1}위</span><span style={{ flex: 1 }}>{s.nick}{s.nick === me.nick && " (나)"}</span><span style={{ fontFamily: "monospace" }}>{s.correct}/{quiz.questions.length}</span>
-                    </div>
-                  ))}
+                  {scoreboard().slice(0, 5).map((s, i) => {
+                    const pct = quiz.questions.length ? Math.round(s.correct / quiz.questions.length * 100) : 0;
+                    const mine = s.nick === me.nick;
+                    return (
+                      <div key={i} className="fade" style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", fontSize: 13, fontWeight: mine ? 900 : 400, color: mine ? "#0E6B5B" : undefined }}>
+                        <span style={{ minWidth: 30, fontSize: i < 3 ? 16 : 12.5 }}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1) + "위"}</span>
+                        <span style={{ minWidth: 96, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.nick}{mine && " (나)"}</span>
+                        <div style={{ flex: 1, height: 12, background: "#e7e5dc", borderRadius: 6, overflow: "hidden" }}>
+                          <div style={{ width: pct + "%", height: "100%", background: mine ? "#0E6B5B" : "#8aa39c" }} />
+                        </div>
+                        <span style={{ fontFamily: "monospace", minWidth: 46, textAlign: "right" }}>{s.correct}/{quiz.questions.length}</span>
+                      </div>
+                    );
+                  })}
                 </Card>
               )}
             </React.Fragment>)}
@@ -3387,7 +3488,6 @@ function App() {
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
                 <Btn sm onClick={exportWeekExcel}>📥 {W}주차 활동 Excel</Btn>
-                <Btn pri sm onClick={exportGradedExcel}>🎯 성적반영 퀴즈 종합 Excel (전체 주차)</Btn>
               </div>
               <div style={{ fontSize: 10.5, color: "#787b82", marginBottom: 12 }}>ⓘ 퀴즈는 마지막 문항까지 진행해 "결과 보기"에 도달해야 기록됩니다. 이번 주 기록: {histList.length}건{histList.length > 0 && " — " + histList.map(h => h.setName + (h.graded ? "(🎯)" : "")).join(", ")}</div>
               <Label>문항별 정답률 (현재 세션)</Label>
