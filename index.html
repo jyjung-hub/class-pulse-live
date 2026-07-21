@@ -2297,7 +2297,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.3";
+const APP_VERSION = "LIVE 2.4";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■"];
@@ -2310,7 +2310,7 @@ const SEED_QUESTIONS = [
   { q: "Community of Inquiry(CoI) 모형의 3요소가 아닌 것은?", choices: ["교수 실재감","사회적 실재감","인지적 실재감","물리적 실재감"], answer: 3, expl: "CoI는 교수·사회적·인지적 실재감으로 구성됩니다." },
 ];
 
-const ACT_TYPES = {BRD:"협업 보드",QZG:"게임 퀴즈",QZS:"자기속도 퀴즈",POL:"즉석 투표",EXT:"Exit Ticket",SIG:"신호등",SGQ:"학생 출제"};
+const ACT_TYPES = {BRD:"협업 보드",QZG:"게임 퀴즈",QZS:"자기속도 퀴즈",POL:"즉석 투표",EXT:"Exit Ticket",SIG:"신호등",SGQ:"학생 출제",CUS:"사용자 활동"};
 const FLOW_TEMPLATES = {
   "플립러닝": { desc: "사전학습 데이터로 본 수업을 조정하는 구조 (JiTT)", blocks: [["QZS","사전학습 확인 퀴즈","수업 전"],["POL","사전학습 난이도 체감","5분",{q:"사전학습, 해보니 어땠나요?",choices:["쉬웠다","보통이었다","어려웠다","하지 못했다"]}],["BRD","팀 활동·사례 분석","20분"],["QZG","정리 퀴즈","15분"],["EXT","Exit Ticket","자동"]] },
   "PBL": { desc: "실제적 문제 중심의 팀 탐구 (문제기반학습)", blocks: [["BRD","문제 제시·쟁점 브레인스토밍","10분"],["BRD","팀별 해결안 작성","25분"],["POL","해결안 동료 투표","5분",{q:"가장 설득력 있는 해결안은?",choices:["1팀","2팀","3팀","4팀"]}],["QZG","핵심 개념 확인","10분"],["EXT","Exit Ticket","자동"]] },
@@ -2373,6 +2373,7 @@ function App() {
   const [conf, setConf] = useState({ joinCode: "4A79K2", pin: "1234" });
   const [flows, setFlows] = useState({});
   const [questionSets, setQuestionSets] = useState({});
+  const [customActs, setCustomActs] = useState({}); // 내 활동 라이브러리 (학기 공통)
   const [session, setSession] = useState(null); // 플로우 러너 {flowId, step}
   const [poll, setPoll] = useState(null); // 즉석 투표 상태
   const [quizHist, setQuizHist] = useState({});
@@ -2386,6 +2387,7 @@ function App() {
     const subs = [
       [R("config"), s => { const v = s.val(); if (v) setConf(c => ({ ...c, ...v })); }],
       [R("questionSets"), s => setQuestionSets(s.val() || {})],
+      [R("customActs"), s => setCustomActs(s.val() || {})],
       [db.ref(".info/connected"), s => setConnected(!!s.val())],
       [db.ref(".info/serverTimeOffset"), s => setOffset(s.val() || 0)],
     ];
@@ -2445,6 +2447,7 @@ function App() {
   const [qDraft, setQDraft] = useState("");
   const [exitForm, setExitForm] = useState({ scale: 0, concept: "", open: "" });
   const [newQ, setNewQ] = useState(null); // 문항 직접 추가 폼
+  const [newAct, setNewAct] = useState(null); // 사용자 정의 활동 만들기 폼
   const [editBlock, setEditBlock] = useState(null); // 플로우 블록 편집
   const [pollDraft, setPollDraft] = useState(null); // 투표 만들기 폼
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
@@ -2627,6 +2630,18 @@ function App() {
     });
   };
   const setBlocks = b => RW("flows/" + activeFlow.id + "/blocks").set(b);
+  const actsList = Object.entries(customActs || {}).map(([id, x]) => ({ id, ...x })).sort((p, q) => (p.createdAt || 0) - (q.createdAt || 0));
+  const saveNewAct = () => {
+    const x = newAct;
+    if (!x.name.trim()) return notify("활동 이름을 입력해 주세요.");
+    if (x.link.trim() && !/^https?:\/\//.test(x.link.trim())) return notify("링크는 https:// 로 시작해야 합니다.");
+    const id = uid();
+    R("customActs/" + id).set({ name: x.name.trim(), dur: x.dur.trim() || "10분", guide: x.guide.trim(), link: x.link.trim(), createdAt: serverNow() });
+    setBlocks([...activeFlow.blocks, { id: uid(), type: "CUS", title: x.name.trim(), dur: x.dur.trim() || "10분", guide: x.guide.trim(), link: x.link.trim() }]);
+    setNewAct(null); notify("활동이 라이브러리에 저장되고 플로우에 추가되었습니다.");
+  };
+  const delAct = (id, name) => askConfirm("활동 삭제", "'" + name + "' 활동을 라이브러리에서 삭제할까요? (이미 플로우에 넣은 블록은 유지됩니다)", () => R("customActs/" + id).remove());
+  const blockAddCustom = x => setBlocks([...activeFlow.blocks, { id: uid(), type: "CUS", title: x.name, dur: x.dur || "10분", guide: x.guide || "", link: x.link || "" }]);
   const blockAdd = type => setBlocks([...activeFlow.blocks, { id: uid(), type, title: ACT_TYPES[type], dur: "10분", ...((type === "QZG" || type === "QZS") && currentSetId ? { setId: currentSetId } : {}) }]);
   const blockDel = id => setBlocks(activeFlow.blocks.filter(x => x.id !== id));
   const blockMove = (i, dir) => {
@@ -2637,7 +2652,8 @@ function App() {
   const blockSave = () => {
     if (!editBlock.title.trim()) return notify("활동 제목을 입력해 주세요.");
     const pollData = (editBlock.pollQ || "").trim() ? { poll: { q: editBlock.pollQ.trim(), choices: (editBlock.pollC || "").split("\n").map(c => c.trim()).filter(Boolean).slice(0, 5) } } : {};
-    setBlocks(activeFlow.blocks.map(x => x.id === editBlock.id ? { ...x, title: editBlock.title.trim(), dur: editBlock.dur.trim() || "10분", ...(editBlock.setId !== undefined ? { setId: editBlock.setId } : {}), ...pollData } : x));
+    const cusData = { guide: (editBlock.guide || "").trim(), link: (editBlock.link || "").trim() };
+    setBlocks(activeFlow.blocks.map(x => x.id === editBlock.id ? { ...x, title: editBlock.title.trim(), dur: editBlock.dur.trim() || "10분", ...(editBlock.setId !== undefined ? { setId: editBlock.setId } : {}), ...pollData, ...(x.type === "CUS" ? cusData : {}) } : x));
     setEditBlock(null);
   };
 
@@ -2722,87 +2738,175 @@ function App() {
       }
       if (!G.length) return notify("성적 반영으로 기록된 퀴즈가 없습니다. (퀴즈를 끝까지 진행해야 기록됩니다)");
       G.sort((a, b) => a.week - b.week || (a.endedAt || 0) - (b.endedAt || 0));
-      const wb = XLSX.utils.book_new();
+      const GRADE = pct => pct >= 80 ? "A" : pct >= 60 ? "B" : "C"; // 등급 경계(80/60)는 여기서 조정
+      const BAR = pct => { const n = Math.round(pct / 20); return "▮".repeat(n) + "▯".repeat(5 - n); };
+      const addr = (r, c) => XLSX.utils.encode_cell({ r, c });
       const ST = {
-        head: { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0E6B5B" } }, alignment: { horizontal: "center" } },
-        O: { font: { bold: true, color: { rgb: "006100" } }, fill: { fgColor: { rgb: "C6EFCE" } }, alignment: { horizontal: "center" } },
-        X: { font: { bold: true, color: { rgb: "9C0006" } }, fill: { fgColor: { rgb: "FFC7CE" } }, alignment: { horizontal: "center" } },
+        title: { font: { bold: true, sz: 16, color: { rgb: "0E6B5B" } } },
+        sub: { font: { sz: 10, color: { rgb: "787B82" } } },
+        head: { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "0E6B5B" } }, alignment: { horizontal: "center", vertical: "center" } },
+        headDark: { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "085041" } }, alignment: { horizontal: "center", vertical: "center" } },
+        subHead: { font: { bold: true, color: { rgb: "085041" } }, fill: { fgColor: { rgb: "E1F5EE" } }, alignment: { horizontal: "center" } },
+        O: { font: { bold: true, color: { rgb: "173404" } }, fill: { fgColor: { rgb: "C6EFCE" } }, alignment: { horizontal: "center" } },
+        X: { font: { bold: true, color: { rgb: "791F1F" } }, fill: { fgColor: { rgb: "FFC7CE" } }, alignment: { horizontal: "center" } },
         dash: { font: { color: { rgb: "999999" } }, alignment: { horizontal: "center" } },
-        sum: { font: { bold: true }, fill: { fgColor: { rgb: "EDECE5" } } },
-        avg: { font: { bold: true, color: { rgb: "0E6B5B" } }, fill: { fgColor: { rgb: "E7F3EE" } } },
+        zebra: { fill: { fgColor: { rgb: "FAFAF7" } } },
+        gA: { font: { bold: true, color: { rgb: "27500A" } }, fill: { fgColor: { rgb: "EAF3DE" } }, alignment: { horizontal: "center" } },
+        gB: { font: { bold: true, color: { rgb: "633806" } }, fill: { fgColor: { rgb: "FAEEDA" } }, alignment: { horizontal: "center" } },
+        gC: { font: { bold: true, color: { rgb: "791F1F" } }, fill: { fgColor: { rgb: "FCEBEB" } }, alignment: { horizontal: "center" } },
+        low: { font: { bold: true, color: { rgb: "791F1F" } }, fill: { fgColor: { rgb: "FFC7CE" } }, alignment: { horizontal: "center" } },
+        avgRow: { font: { bold: true, color: { rgb: "085041" } }, fill: { fgColor: { rgb: "E7F3EE" } }, alignment: { horizontal: "center" } },
+        bar: { font: { color: { rgb: "0F6E56" } } },
+        center: { alignment: { horizontal: "center" } },
+        correct: { font: { bold: true, color: { rgb: "173404" } }, fill: { fgColor: { rgb: "C6EFCE" } }, alignment: { horizontal: "center" } },
       };
-      /* ---- 시트 1: 개인별 상세 (문항별 O/X 색상) ---- */
-      const cols = []; // {g, qi, label}
-      G.forEach(g => g.questions.forEach((q, qi) => cols.push({ g, qi, label: g.week + "주-" + g.setName + "-Q" + (qi + 1) })));
+      const gradeStyle = pct => pct >= 80 ? ST.gA : pct >= 60 ? ST.gB : ST.gC;
+      const wb = XLSX.utils.book_new();
+
+      /* ===== 학생·점수 공통 계산 ===== */
       const ids = {};
       G.forEach(g => Object.entries(g.players).forEach(([pid, n]) => { ids[pid] = n; }));
-      const totalQ = cols.length;
-      const aoa = [["표시이름", ...cols.map(c => c.label), "총점", "평균(%)"]];
-      const oxPos = []; // [row, col, 'O'|'X'|'-']
-      Object.entries(ids).forEach(([pid, name], ri) => {
+      const totalQ = G.reduce((s, g) => s + g.questions.length, 0);
+      const stu = Object.entries(ids).map(([pid, name]) => {
         let sum = 0;
-        const row = [name];
-        cols.forEach((c, ci) => {
-          const a = (c.g.answers[c.qi] || {})[pid];
-          if (a === undefined) { row.push("-"); oxPos.push([ri + 1, ci + 1, "-"]); }
-          else if (a.choice === c.g.questions[c.qi].answer) { sum++; row.push("O"); oxPos.push([ri + 1, ci + 1, "O"]); }
-          else { row.push("X"); oxPos.push([ri + 1, ci + 1, "X"]); }
+        const perQuiz = G.map(g => {
+          let c = 0;
+          Object.entries(g.answers).forEach(([qi, m]) => { const a = (m || {})[pid]; if (a && a.choice === (g.questions[qi] || {}).answer) c++; });
+          sum += c; return c;
         });
-        row.push(sum, totalQ ? Math.round(sum / totalQ * 100) : 0);
-        aoa.push(row);
-      });
-      const nStu = Object.keys(ids).length;
-      // 문항별 평균(정답률) 행
-      const qAvgRow = ["문항별 평균(%)"];
+        return { pid, name, perQuiz, sum, pct: totalQ ? Math.round(sum / totalQ * 100) : 0 };
+      }).sort((x, y) => y.sum - x.sum || x.name.localeCompare(y.name));
+      stu.forEach((s, k) => { s.rank = k > 0 && s.sum === stu[k - 1].sum ? stu[k - 1].rank : k + 1; });
       let grandT = 0, grandC = 0;
-      cols.forEach(c => {
-        const m = c.g.answers[c.qi] || {}; const n = Object.keys(m).length;
-        const cc = Object.values(m).filter(a => a.choice === c.g.questions[c.qi].answer).length;
-        grandT += n; grandC += cc;
-        qAvgRow.push(n ? Math.round(cc / n * 100) : 0);
-      });
+      G.forEach(g => Object.entries(g.answers).forEach(([qi, m]) => Object.values(m || {}).forEach(a => { grandT++; if (a.choice === (g.questions[qi] || {}).answer) grandC++; })));
       const grandAvg = grandT ? Math.round(grandC / grandT * 100) : 0;
-      qAvgRow.push("", grandAvg);
-      aoa.push(qAvgRow);
-      aoa.push(["종합 평균(%) = 전체 응답 기준", ...Array(totalQ + 1).fill(""), grandAvg]);
-      const ws1 = XLSX.utils.aoa_to_sheet(aoa);
-      const addr = (r, c) => XLSX.utils.encode_cell({ r, c });
-      // 스타일 적용
-      for (let c = 0; c <= totalQ + 2; c++) { const cell = ws1[addr(0, c)]; if (cell) cell.s = ST.head; }
-      oxPos.forEach(([r, c, v]) => { const cell = ws1[addr(r, c)]; if (cell) cell.s = v === "O" ? ST.O : v === "X" ? ST.X : ST.dash; });
-      for (let r = 1; r <= nStu; r++) {
-        [totalQ + 1, totalQ + 2].forEach(c => { const cell = ws1[addr(r, c)]; if (cell) cell.s = ST.sum; });
-      }
-      for (let c = 0; c <= totalQ + 2; c++) {
-        [nStu + 1, nStu + 2].forEach(r => { const cell = ws1[addr(r, c)]; if (cell) cell.s = ST.avg; });
-      }
-      ws1["!cols"] = [{ wch: 18 }, ...cols.map(() => ({ wch: 6 })), { wch: 7 }, { wch: 9 }];
-      XLSX.utils.book_append_sheet(wb, ws1, "개인별상세");
-      /* ---- 시트 2: 주차별 요약 ---- */
-      const sRows = [["주차", "퀴즈", "문항수", "응시인원", "주차 평균 정답률(%)"]];
+
+      /* ===== ① 표지·요약 ===== */
+      const cRows = [
+        ["Class Pulse 성적 리포트"], ["교육공학의 이해 · 2026-2학기"], [""],
+        ["생성일", new Date().toLocaleString("ko-KR")], [""],
+        ["학기 지표"], ["성적반영 퀴즈", G.length + "개"], ["총 문항 수", totalQ + "문항"], ["응시 학생 수", stu.length + "명"], ["종합 평균 정답률", grandAvg + "%"], [""],
+        ["성적반영 퀴즈 목록"], ["주차", "퀴즈", "문항수", "응시", "평균(%)"]];
+      const listStart = cRows.length;
       G.forEach(g => {
         let t = 0, c = 0; const ppl = new Set();
         Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => { ppl.add(pid); t++; if (a.choice === (g.questions[qi] || {}).answer) c++; }));
-        sRows.push([g.week, g.setName, g.questions.length, ppl.size, t ? Math.round(c / t * 100) : 0]);
+        cRows.push([g.week + "주", g.setName, g.questions.length, ppl.size, t ? Math.round(c / t * 100) : 0]);
       });
-      sRows.push(["종합", "", "", "", grandAvg]);
-      const ws2 = XLSX.utils.aoa_to_sheet(sRows);
-      for (let c = 0; c < 5; c++) { const cell = ws2[addr(0, c)]; if (cell) cell.s = ST.head; }
-      for (let c = 0; c < 5; c++) { const cell = ws2[addr(sRows.length - 1, c)]; if (cell) cell.s = ST.avg; }
-      XLSX.utils.book_append_sheet(wb, ws2, "주차별요약");
-      /* ---- 시트 3: 문항별 ---- */
-      const qRows = [["주차", "퀴즈", "문항번호", "문항", "정답", "응답수", "정답률(%)"]];
+      const wsC = XLSX.utils.aoa_to_sheet(cRows);
+      wsC[addr(0, 0)].s = ST.title; wsC[addr(1, 0)].s = ST.sub;
+      [5, 11].forEach(r => { if (wsC[addr(r, 0)]) wsC[addr(r, 0)].s = { font: { bold: true, color: { rgb: "085041" } } }; });
+      for (let c = 0; c < 5; c++) { const cell = wsC[addr(listStart - 1, c)]; if (cell) cell.s = ST.head; }
+      wsC["!cols"] = [{ wch: 18 }, { wch: 26 }, { wch: 8 }, { wch: 7 }, { wch: 9 }];
+      XLSX.utils.book_append_sheet(wb, wsC, "표지요약");
+
+      /* ===== ② 성적표 (병합 헤더 · O/X · 석차 · 등급 · 막대) ===== */
+      const head0 = ["표시이름"]; const head1 = [""];
+      const merges = [{ s: { r: 0, c: 0 }, e: { r: 1, c: 0 } }];
+      let col = 1;
+      G.forEach(g => {
+        head0.push(g.week + "주 · " + g.setName);
+        for (let q = 1; q < g.questions.length; q++) head0.push("");
+        g.questions.forEach((_, qi) => head1.push("Q" + (qi + 1)));
+        if (g.questions.length > 1) merges.push({ s: { r: 0, c: col }, e: { r: 0, c: col + g.questions.length - 1 } });
+        col += g.questions.length;
+      });
+      ["총점", "평균%", "석차", "등급", "분포"].forEach(t => {
+        head0.push(t); head1.push("");
+        merges.push({ s: { r: 0, c: col }, e: { r: 1, c: col } }); col++;
+      });
+      const aoa = [head0, head1];
+      const oxPos = [];
+      stu.forEach((s, ri) => {
+        const row = [s.name]; let cc = 1;
+        G.forEach(g => g.questions.forEach((q, qi) => {
+          const a = (g.answers[qi] || {})[s.pid];
+          const v = a === undefined ? "-" : a.choice === q.answer ? "O" : "X";
+          row.push(v); oxPos.push([ri + 2, cc++, v]);
+        }));
+        row.push(s.sum, s.pct, s.rank, GRADE(s.pct), BAR(s.pct));
+        aoa.push(row);
+      });
+      const qAvgRow = ["문항별 평균%"]; const lowCols = [];
+      let cc2 = 1;
       G.forEach(g => g.questions.forEach((q, qi) => {
         const m = g.answers[qi] || {}; const n = Object.keys(m).length;
         const c = Object.values(m).filter(a => a.choice === q.answer).length;
-        qRows.push([g.week, g.setName, qi + 1, q.q, (q.choices || [])[q.answer] || "", n, n ? Math.round(c / n * 100) : 0]);
+        const p = n ? Math.round(c / n * 100) : 0;
+        if (p < 50) lowCols.push(cc2);
+        qAvgRow.push(p); cc2++;
       }));
-      const ws3 = XLSX.utils.aoa_to_sheet(qRows);
-      for (let c = 0; c < 7; c++) { const cell = ws3[addr(0, c)]; if (cell) cell.s = ST.head; }
-      ws3["!cols"] = [{ wch: 5 }, { wch: 14 }, { wch: 8 }, { wch: 44 }, { wch: 18 }, { wch: 7 }, { wch: 10 }];
-      XLSX.utils.book_append_sheet(wb, ws3, "문항별");
-      XLSX.writeFile(wb, "ClassPulse_성적반영퀴즈_종합.xlsx");
-      notify("성적 반영 퀴즈 종합 Excel이 다운로드됩니다.");
+      qAvgRow.push("", grandAvg, "", "", "종합 평균 " + grandAvg + "%");
+      aoa.push(qAvgRow);
+      const wsG = XLSX.utils.aoa_to_sheet(aoa);
+      wsG["!merges"] = merges;
+      const lastCol = totalQ + 5;
+      for (let c = 0; c <= lastCol; c++) {
+        const c0 = wsG[addr(0, c)]; if (c0) c0.s = (c === 0 || c > totalQ) ? ST.head : ST.headDark;
+        const c1 = wsG[addr(1, c)]; if (c1) c1.s = ST.subHead;
+      }
+      oxPos.forEach(([r, c, v]) => { const cell = wsG[addr(r, c)]; if (cell) cell.s = v === "O" ? ST.O : v === "X" ? ST.X : ST.dash; });
+      stu.forEach((s, ri) => {
+        const r = ri + 2; const zebra = ri % 2 === 1;
+        const nameCell = wsG[addr(r, 0)]; if (nameCell && zebra) nameCell.s = ST.zebra;
+        const sumCell = wsG[addr(r, totalQ + 1)]; if (sumCell) sumCell.s = { ...ST.center, font: { bold: true } };
+        const pctCell = wsG[addr(r, totalQ + 2)]; if (pctCell) pctCell.s = gradeStyle(s.pct);
+        const rankCell = wsG[addr(r, totalQ + 3)]; if (rankCell) rankCell.s = ST.center;
+        const grCell = wsG[addr(r, totalQ + 4)]; if (grCell) grCell.s = gradeStyle(s.pct);
+        const barCell = wsG[addr(r, totalQ + 5)]; if (barCell) barCell.s = s.pct >= 60 ? ST.bar : { font: { color: { rgb: "BA7517" } } };
+      });
+      const avgR = stu.length + 2;
+      for (let c = 0; c <= lastCol; c++) {
+        const cell = wsG[addr(avgR, c)];
+        if (cell) cell.s = (c >= 1 && c <= totalQ && lowCols.includes(c)) ? ST.low : ST.avgRow;
+      }
+      wsG["!cols"] = [{ wch: 18 }, ...Array.from({ length: totalQ }, () => ({ wch: 5 })), { wch: 6 }, { wch: 7 }, { wch: 5 }, { wch: 5 }, { wch: 12 }];
+      wsG["!rows"] = [{ hpt: 22 }, { hpt: 16 }];
+      XLSX.utils.book_append_sheet(wb, wsG, "성적표");
+
+      /* ===== ③ 문항 분석 (난이도 색 + 오답지 매력도) ===== */
+      const maxC = Math.max(...G.map(g => Math.max(...g.questions.map(q => (q.choices || []).length), 0)), 4);
+      const qHead = ["주차", "퀴즈", "Q", "문항", "정답", "응답수", "정답률%"];
+      for (let k = 0; k < maxC; k++) qHead.push("보기" + (k + 1) + " 선택%");
+      const qA = [qHead]; const qStyles = [];
+      G.forEach(g => g.questions.forEach((q, qi) => {
+        const m = g.answers[qi] || {}; const n = Object.keys(m).length;
+        const cor = Object.values(m).filter(a => a.choice === q.answer).length;
+        const pct = n ? Math.round(cor / n * 100) : 0;
+        const row = [g.week, g.setName, qi + 1, q.q, (q.choices || [])[q.answer] || "", n, pct];
+        for (let k = 0; k < maxC; k++) {
+          if (!(q.choices || [])[k]) { row.push(""); continue; }
+          const sel = Object.values(m).filter(a => a.choice === k).length;
+          row.push(n ? Math.round(sel / n * 100) : 0);
+        }
+        const r = qA.length;
+        qStyles.push([r, 6, pct < 50 ? "low" : "center"]);
+        qStyles.push([r, 7 + q.answer, "correct"]);
+        qA.push(row);
+      }));
+      const wsQ = XLSX.utils.aoa_to_sheet(qA);
+      for (let c = 0; c < qHead.length; c++) { const cell = wsQ[addr(0, c)]; if (cell) cell.s = ST.head; }
+      qStyles.forEach(([r, c, k]) => { const cell = wsQ[addr(r, c)]; if (cell) cell.s = ST[k]; });
+      wsQ["!cols"] = [{ wch: 5 }, { wch: 14 }, { wch: 4 }, { wch: 42 }, { wch: 16 }, { wch: 7 }, { wch: 8 }, ...Array.from({ length: maxC }, () => ({ wch: 10 }))];
+      XLSX.utils.book_append_sheet(wb, wsQ, "문항분석");
+
+      /* ===== ④ 주차별 요약 (참여율) ===== */
+      const maxPpl = Math.max(...G.map(g => { const p = new Set(); Object.values(g.answers).forEach(m => Object.keys(m || {}).forEach(x => p.add(x))); return p.size; }), 1);
+      const sRows = [["주차", "퀴즈", "문항수", "응시인원", "참여율%", "평균 정답률%"]];
+      G.forEach(g => {
+        let t = 0, c = 0; const ppl = new Set();
+        Object.entries(g.answers).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => { ppl.add(pid); t++; if (a.choice === (g.questions[qi] || {}).answer) c++; }));
+        sRows.push([g.week, g.setName, g.questions.length, ppl.size, Math.round(ppl.size / maxPpl * 100), t ? Math.round(c / t * 100) : 0]);
+      });
+      sRows.push(["종합", "", "", "", "", grandAvg]);
+      const wsS = XLSX.utils.aoa_to_sheet(sRows);
+      for (let c = 0; c < 6; c++) { const cell = wsS[addr(0, c)]; if (cell) cell.s = ST.head; }
+      for (let c = 0; c < 6; c++) { const cell = wsS[addr(sRows.length - 1, c)]; if (cell) cell.s = ST.avgRow; }
+      wsS["!cols"] = [{ wch: 5 }, { wch: 22 }, { wch: 8 }, { wch: 9 }, { wch: 9 }, { wch: 13 }];
+      XLSX.utils.book_append_sheet(wb, wsS, "주차별요약");
+
+      XLSX.writeFile(wb, "ClassPulse_성적리포트.xlsx");
+      notify("성적 리포트 Excel(4시트)이 다운로드됩니다.");
     } catch (err) { console.error(err); notify("Excel 생성 실패: " + (err && err.message ? err.message : "알 수 없는 오류")); }
   };
 
@@ -2893,6 +2997,7 @@ function App() {
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {(runBlock.type === "QZG" || runBlock.type === "QZS") && <Btn sm onClick={openStepQuiz} style={{ borderColor: "#fff" }}>▶ 이 단계 퀴즈 열기</Btn>}
                 {runBlock.type === "POL" && <Btn sm onClick={() => { setPollDraft({ q: (runBlock.poll && runBlock.poll.q) || runBlock.title, options: (runBlock.poll && runBlock.poll.choices) ? [...runBlock.poll.choices] : [...POLL_SCALE] }); setTab("signal"); }} style={{ borderColor: "#fff" }}>📊 이 단계 투표 열기</Btn>}
+                {runBlock.type === "CUS" && runBlock.link && <a href={runBlock.link} target="_blank" rel="noopener noreferrer" className="cpb sm" style={{ borderColor: "#fff", background: "#fff", color: "#0E6B5B", textDecoration: "none" }}>🔗 자료 열기</a>}
                 {runBlock.type === "EXT" && <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>Exit 결과 보기</Btn>}
                 <Btn sm onClick={nextStep} style={{ borderColor: "#fff" }}>{session.step + 1 >= runFlow.blocks.length ? "수업 종료" : "다음 단계 →"}</Btn>
                 <Btn sm onClick={endFlowSession} style={{ borderColor: "#fff", marginLeft: "auto" }}>종료</Btn>
@@ -2905,6 +3010,13 @@ function App() {
                   ? <Btn sm onClick={() => setTab("signal")} style={{ borderColor: "#fff" }}>📊 투표 참여하기</Btn>
                   : runBlock.type === "EXT"
                   ? <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>⏻ Exit Ticket 제출하기</Btn>
+                  : runBlock.type === "CUS"
+                  ? <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+                      {runBlock.guide && <span style={{ fontSize: 12.5, lineHeight: 1.6, background: "rgba(255,255,255,.12)", borderRadius: 8, padding: "7px 10px" }}>📌 {runBlock.guide}</span>}
+                      {runBlock.link
+                        ? <a href={runBlock.link} target="_blank" rel="noopener noreferrer" className="cpb sm" style={{ alignSelf: "flex-start", borderColor: "#fff", background: "#fff", color: "#0E6B5B", textDecoration: "none" }}>🔗 활동 열기</a>
+                        : !runBlock.guide && <span style={{ fontSize: 12, opacity: .85 }}>교수님 안내에 따라 활동을 진행해 주세요</span>}
+                    </div>
                   : <span style={{ fontSize: 12, opacity: .85 }}>교수님 안내에 따라 활동을 진행해 주세요 (이해도는 🚦 신호등으로!)</span>}
               </div>
             )}
@@ -3110,6 +3222,12 @@ function App() {
                             <input value={editBlock.title} onChange={e => setEditBlock(s => ({ ...s, title: e.target.value }))} placeholder="활동 제목" className="inp" style={{ flex: 2 }} />
                             <input value={editBlock.dur} onChange={e => setEditBlock(s => ({ ...s, dur: e.target.value }))} placeholder="시간 (예: 10분)" className="inp" style={{ flex: 1 }} />
                           </div>
+                          {activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "CUS" && (
+                            <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              <textarea rows={2} value={editBlock.guide || ""} onChange={e => setEditBlock(s => ({ ...s, guide: e.target.value }))} placeholder="학생 안내문" className="inp" style={{ resize: "vertical" }} />
+                              <input value={editBlock.link || ""} onChange={e => setEditBlock(s => ({ ...s, link: e.target.value }))} placeholder="자료 링크 (https://…)" className="inp" />
+                            </div>
+                          )}
                           {activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "POL" && (
                             <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                               <div style={{ fontSize: 11, color: "#787b82" }}>📊 투표 질문·보기 (블록 저장 — 수업 중 [이 단계 투표 열기] 시 자동 입력됩니다)</div>
@@ -3134,8 +3252,8 @@ function App() {
                       ) : (
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: "#0E6B5B", fontWeight: 700, minWidth: 30 }}>{f.type}</span>
-                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span>{f.setId && questionSets?.[f.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[f.setId].name}</span>}{f.type === "POL" && f.poll && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 📊{f.poll.q}</span>}</span>
-                          <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur, setId: f.setId || "", pollQ: (f.poll && f.poll.q) || "", pollC: ((f.poll && f.poll.choices) || []).join("\n") })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
+                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span>{f.setId && questionSets?.[f.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[f.setId].name}</span>}{f.type === "POL" && f.poll && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 📊{f.poll.q}</span>}{f.type === "CUS" && f.link && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗링크</span>}</span>
+                          <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur, setId: f.setId || "", pollQ: (f.poll && f.poll.q) || "", pollC: ((f.poll && f.poll.choices) || []).join("\n"), guide: f.guide || "", link: f.link || "" })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
                           <button onClick={() => blockMove(i, -1)} disabled={i === 0} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === 0 ? .25 : 1 }} aria-label="위로">↑</button>
                           <button onClick={() => blockMove(i, 1)} disabled={i === activeFlow.blocks.length - 1} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === activeFlow.blocks.length - 1 ? .25 : 1 }} aria-label="아래로">↓</button>
                           <button onClick={() => blockDel(f.id)} style={{ border: "none", background: "none", color: "#b3402a", fontSize: 13, cursor: "pointer" }} aria-label="삭제">✕</button>
@@ -3150,6 +3268,30 @@ function App() {
                   <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                     {Object.entries(ACT_TYPES).map(([k, v]) => <Btn key={k} sm onClick={() => blockAdd(k)}>+ {v}</Btn>)}
                   </div>
+                  <div style={{ fontSize: 10.5, color: "#787b82", margin: "10px 0 4px", fontWeight: 900, letterSpacing: ".06em" }}>내 활동 (학기 공통 라이브러리)</div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {actsList.map(x => (
+                      <span key={x.id} style={{ display: "inline-flex", alignItems: "center", border: "1.5px solid #24272B", borderRadius: 8, overflow: "hidden" }}>
+                        <button onClick={() => blockAddCustom(x)} style={{ border: "none", background: "#fff", padding: "4px 8px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ 📌 {x.name}{x.link ? " 🔗" : ""}</button>
+                        <button onClick={() => delAct(x.id, x.name)} aria-label="라이브러리에서 삭제" style={{ border: "none", borderLeft: "1px solid #d8d6cc", background: "#faf9f4", padding: "4px 6px", fontSize: 10.5, color: "#b3402a", cursor: "pointer" }}>✕</button>
+                      </span>
+                    ))}
+                    <Btn sm pri onClick={() => setNewAct({ name: "", dur: "10분", guide: "", link: "" })}>＋ 직접 만들기</Btn>
+                  </div>
+                  {newAct && (
+                    <div className="fade" style={{ border: "1.5px solid #d8d6cc", borderRadius: 10, padding: 12, marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input value={newAct.name} onChange={e => setNewAct(s => ({ ...s, name: e.target.value }))} placeholder="활동 이름 (예: 갤러리 워크)" className="inp" style={{ flex: 2 }} />
+                        <input value={newAct.dur} onChange={e => setNewAct(s => ({ ...s, dur: e.target.value }))} placeholder="시간" className="inp" style={{ flex: 1 }} />
+                      </div>
+                      <textarea rows={2} value={newAct.guide} onChange={e => setNewAct(s => ({ ...s, guide: e.target.value }))} placeholder="학생 안내문 — 수업 중 이 단계가 되면 학생 화면에 표시됩니다" className="inp" style={{ resize: "vertical" }} />
+                      <input value={newAct.link} onChange={e => setNewAct(s => ({ ...s, link: e.target.value }))} placeholder="자료 링크 (선택 · https://… — 학생에게 [활동 열기] 버튼으로 표시)" className="inp" />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Btn pri sm onClick={saveNewAct}>저장하고 플로우에 추가</Btn>
+                        <Btn sm onClick={() => setNewAct(null)}>취소</Btn>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </Card>
             )}
