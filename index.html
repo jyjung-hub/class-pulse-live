@@ -2327,7 +2327,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9.1";
+const APP_VERSION = "LIVE 2.9.2";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2570,6 +2570,22 @@ function App() {
       R("config/currentSetId").set(id);
     }
   }, [isInstructor, connected, questionSets]);
+  const renameSet = () => {
+    if (!curSet) return;
+    askText("세트 이름 변경", null, curSet.name, "세트 이름", v => {
+      if (!v.trim()) { notify("이름을 입력해 주세요."); return false; }
+      R("questionSets/" + curSet.id + "/name").set(v.trim());
+      notify("세트 이름이 변경되었습니다.");
+    });
+  };
+  const delSet = () => {
+    if (!curSet) return;
+    askConfirm("세트 삭제", "'" + curSet.name + "' 세트와 문항 " + curSet.questions.length + "개를 삭제할까요? 되돌릴 수 없습니다. (이미 완주된 퀴즈 기록은 유지됩니다)", () => {
+      const rest = setsList.filter(s => s.id !== curSet.id);
+      R("questionSets/" + curSet.id).remove();
+      if (rest.length) R("config/currentSetId").set(rest[0].id);
+    });
+  };
   const newSet = () => askText("새 문항 세트", "예: 7주차 사전학습, 중간 점검", "", "세트 이름", v => {
     if (!v.trim()) { notify("이름을 입력해 주세요."); return false; }
     const id = uid();
@@ -2661,8 +2677,13 @@ function App() {
     } else {
       obj = { type: "ES", q: q.q.trim(), rubric: q.rubric.trim(), expl: q.expl.trim() || "-" };
     }
-    R("questionSets/" + curSet.id + "/questions").set([...curSet.questions, obj]);
-    setNewQ(null); notify("'" + curSet.name + "' 세트에 " + QTYPES[q.type] + " 문항이 추가되었습니다.");
+    if (q.editIdx !== null && q.editIdx !== undefined) {
+      R("questionSets/" + curSet.id + "/questions").set(curSet.questions.map((x, j2) => j2 === q.editIdx ? obj : x));
+      setNewQ(null); notify("Q" + (q.editIdx + 1) + " 문항이 수정되었습니다.");
+    } else {
+      R("questionSets/" + curSet.id + "/questions").set([...curSet.questions, obj]);
+      setNewQ(null); notify("'" + curSet.name + "' 세트에 " + QTYPES[q.type] + " 문항이 추가되었습니다.");
+    }
   };
   const delQuestion = i => askConfirm("문항 삭제", "Q"+(i+1)+" 문항을 삭제할까요?", () =>
     R("questionSets/" + curSet.id + "/questions").set(curSet.questions.filter((_, j) => j !== i)));
@@ -3752,19 +3773,28 @@ function App() {
                       {setsList.map(s => <option key={s.id} value={s.id}>{s.name} ({s.questions.length}문항)</option>)}
                     </select>
                     <Btn sm onClick={newSet}>+ 새 세트</Btn>
+                    <Btn sm onClick={renameSet}>이름 변경</Btn>
+                    <Btn sm onClick={delSet} style={{ color: "#b3402a" }}>세트 삭제</Btn>
                   </div>
                   {(curSet ? curSet.questions : []).map((q, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, padding: "6px 0", borderBottom: "1px dashed #eceade" }}>
                       <span style={{ flex: 1 }}><b>Q{i+1}.</b> <span style={{ fontSize: 10, background: "#e7f3ee", color: "#085041", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>{QTYPES[q.type] || "선다형"}</span> {q.q} <span style={{ color: "#0E6B5B", fontSize: 11 }}>{q.type === "SA" ? "정답: " + (q.answers || []).join(" / ") : q.type === "ES" ? "서술 · 수동채점" : "정답: " + SHAPES[q.answer]}</span></span>
+                      <button onClick={() => setNewQ({
+                        editIdx: i, type: q.type || "MC", q: q.q,
+                        choices: (q.choices && q.choices.length) ? [...q.choices] : ["", "", "", ""],
+                        answer: typeof q.answer === "number" ? q.answer : 0,
+                        accepted: (q.answers || []).join(", "), rubric: q.rubric || "", expl: q.expl === "-" ? "" : (q.expl || ""),
+                      })} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13 }} aria-label="문항 수정">✏️</button>
                       <button onClick={() => delQuestion(i)} style={{ border: "none", background: "none", color: "#b3402a", cursor: "pointer" }}>✕</button>
                     </div>
                   ))}
                   <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
                     <Btn pri disabled={!curSet || curSet.questions.length === 0} onClick={() => openLobby(currentSetId)}>대기실 열기 ({curSet ? curSet.questions.length : 0}문항)</Btn>
-                    <Btn onClick={() => setNewQ({ type: "MC", q: "", choices: ["", "", "", ""], answer: 0, expl: "", accepted: "", rubric: "" })}>+ 문항 직접 추가</Btn>
+                    <Btn onClick={() => setNewQ({ editIdx: null, type: "MC", q: "", choices: ["", "", "", ""], answer: 0, expl: "", accepted: "", rubric: "" })}>+ 문항 직접 추가</Btn>
                   </div>
                   {newQ && (
                     <div className="fade" style={{ border: "1.5px solid #d8d6cc", borderRadius: 10, padding: 12, marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {newQ.editIdx !== null && newQ.editIdx !== undefined && <div style={{ fontSize: 11.5, fontWeight: 900, color: "#0F6E56" }}>✏️ Q{newQ.editIdx + 1} 문항 수정 중</div>}
                       <div style={{ display: "flex", gap: 4 }}>
                         {Object.entries(QTYPES).map(([k2, v]) => (
                           <button key={k2} onClick={() => setNewQ(s => ({ ...s, type: k2, answer: 0 }))}
@@ -3808,7 +3838,7 @@ function App() {
                         </div>
                       )}
                       <input value={newQ.expl} onChange={e => setNewQ(s => ({ ...s, expl: e.target.value }))} placeholder="해설 (한 문장)" className="inp" />
-                      <div style={{ display: "flex", gap: 6 }}><Btn pri sm onClick={addQuestion}>추가</Btn><Btn sm onClick={() => setNewQ(null)}>취소</Btn></div>
+                      <div style={{ display: "flex", gap: 6 }}><Btn pri sm onClick={addQuestion}>{newQ.editIdx !== null && newQ.editIdx !== undefined ? "저장" : "추가"}</Btn><Btn sm onClick={() => setNewQ(null)}>취소</Btn></div>
                     </div>
                   )}
                 </Card>
