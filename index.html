@@ -2297,7 +2297,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.2";
+const APP_VERSION = "LIVE 2.3";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■"];
@@ -2336,6 +2336,9 @@ function QRSvg({ text, size = 170 }) {
   } catch { return <div style={{ fontSize: 12, color: "#b3402a" }}>QR 생성 실패</div>; }
 }
 
+const Dot = ({ st }) => st === "f"
+  ? <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", border: "1.5px dashed #b4b2a9" }} />
+  : <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: st === "g" ? "#1D9E75" : st === "a" ? "#EF9F27" : "#D9D7CD" }} />;
 const Btn = ({ children, pri, sm, ...rest }) => <button {...rest} className={"cpb"+(pri?" pri":"")+(sm?" sm":"")}>{children}</button>;
 const Card = ({ children, style }) => <div className="card" style={style}>{children}</div>;
 const Label = ({ children }) => <div style={{ fontSize: 10.5, fontWeight: 900, letterSpacing: ".08em", color: "#787b82", textTransform: "uppercase", marginBottom: 6 }}>{children}</div>;
@@ -2374,7 +2377,7 @@ function App() {
   const [poll, setPoll] = useState(null); // 즉석 투표 상태
   const [quizHist, setQuizHist] = useState({});
   const [activeFlowIdW, setActiveFlowIdW] = useState(null);
-  const [semStats, setSemStats] = useState({ graded: 0, weeks: 0 });
+  const [semData, setSemData] = useState({}); // 학기 전체 스냅숏 (매트릭스용)
   const [connected, setConnected] = useState(null);
   const [offset, setOffset] = useState(0);
   const serverNow = () => Date.now() + offset;
@@ -2449,20 +2452,30 @@ function App() {
   const askText = (title, desc, initial, placeholder, ok) => setDlg({ mode: "prompt", title, desc, value: initial || "", placeholder, ok });
   const askConfirm = (title, desc, ok) => setDlg({ mode: "confirm", title, desc, ok });
   const isInstructor = role === "instructor" && instructorOk;
-  useEffect(() => { // 교수자 홈 진입 시 학기 통계 집계
-    if (!(isInstructor && tab === "home")) return;
-    db.ref(ROOM + "/weeks").once("value").then(s => {
-      const weeks = s.val() || {};
-      let g = 0, act = 0;
-      Object.values(weeks).forEach(wk => {
-        const hist = wk.quizHistory || {};
-        const hasAct = Object.keys(hist).length || Object.keys(wk.exit || {}).length || Object.keys(wk.signals || {}).length;
-        if (hasAct) act++;
-        Object.values(hist).forEach(h => { if (h.graded) g++; });
-      });
-      setSemStats({ graded: g, weeks: act });
-    }).catch(() => {});
-  }, [isInstructor, tab, W]);
+  const refreshSem = () => db.ref(ROOM + "/weeks").once("value").then(s => setSemData(s.val() || {})).catch(() => {});
+  useEffect(() => { if (isInstructor && tab === "home") refreshSem(); }, [isInstructor, tab, W]);
+  const semWeek = w => {
+    const d = semData["w" + w] || {};
+    const fl = d.flows || {};
+    const flowN = Object.keys(fl).length;
+    const hasQuizBlock = Object.values(fl).some(f => (f.blocks || []).some(b => b.type === "QZG" || b.type === "QZS"));
+    const hist = d.quizHistory || {};
+    const quizN = Object.keys(hist).length;
+    const gradedN = Object.values(hist).filter(h => h.graded).length;
+    const pollY = !!d.poll;
+    const sigN = Object.keys(d.signals || {}).length;
+    const exitN = Object.keys(d.exit || {}).length;
+    const ppl = new Set();
+    Object.values(hist).forEach(h => Object.keys(h.players || {}).forEach(p => ppl.add(p)));
+    Object.keys(d.exit || {}).forEach(p => ppl.add(p));
+    return { flowN, hasQuizBlock, quizN, gradedN, pollY, sigN, exitN, people: ppl.size,
+      empty: !flowN && !quizN && !pollY && !sigN && !exitN };
+  };
+  const semKpi = (() => {
+    let act = 0, graded = 0, s = 0, n = 0;
+    for (let w = 1; w <= 15; w++) { const x = semWeek(w); if (!x.empty) act++; graded += x.gradedN; if (x.people) { s += x.people; n++; } }
+    return { act, graded, avg: n ? Math.round(s / n) : 0 };
+  })();
   const renameMe = () => askText("표시이름 설정", "성적 반영 퀴즈에서는 학번+이름(예: 20261234 홍길동)으로 설정해 주세요.", me.nick, "표시이름", v => {
     if (!v.trim()) { notify("표시이름을 입력해 주세요."); return false; }
     const next = { ...me, nick: v.trim() };
@@ -2919,52 +2932,94 @@ function App() {
         {/* ==================== HOME ==================== */}
         {tab === "home" && (isInstructor ? (
           <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Card style={{ background: "#faf9f4" }}>
-              <Label>주차 선택 — 모든 활동 데이터가 주차별로 분리 관리됩니다</Label>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 5, marginBottom: 14 }}>
-                {Array.from({ length: 15 }, (_, i) => i + 1).map(w => (
-                  <button key={w} onClick={() => R("config/week").set(w)}
-                    style={{ padding: "8px 2px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 11.5,
-                      border: "1.5px solid " + (w === W ? "#0E6B5B" : "#d8d6cc"),
-                      background: w === W ? "#0E6B5B" : (w === 8 || w === 15) ? "#faf3ee" : "#fff",
-                      color: w === W ? "#fff" : (w === 8 || w === 15) ? "#b3402a" : "#24272B" }}>
-                    {w}주{w === 8 ? "🎓" : w === 15 ? "🎓" : ""}
-                  </button>
-                ))}
-              </div>
-              <Label>이번 주 현황 · {weekLabel(W)}</Label>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 14 }}>
-                {[["👥", playerCount + "명", "퀴즈 접속"], ["🚦", sigCounts.total + "명", "신호 참여"], ["⏻", exitList.length + "건", "Exit 응답"], ["▶", histList.length + "건", "퀴즈 기록"]].map(([ic, v, k], i) => (
-                  <div key={i} style={{ background: "#fff", border: "1.5px solid #d8d6cc", borderRadius: 12, padding: "12px 4px", textAlign: "center" }}>
-                    <div style={{ fontSize: 15 }}>{ic}</div>
-                    <div style={{ fontSize: 17, fontWeight: 900, color: "#0E6B5B", margin: "2px 0" }}>{v}</div>
-                    <div style={{ fontSize: 10, color: "#787b82" }}>{k}</div>
-                  </div>
-                ))}
-              </div>
-              <Label>수업 진행</Label>
-              <div style={{ fontSize: 12.5, color: "#55585f", marginBottom: 10 }}>참여 코드 <b style={{ fontFamily: "monospace", color: "#0E6B5B" }}>{conf.joinCode}</b> · 접속 학생 {playerCount}명 · Exit {exitList.length}건 · 활성 플로우: <b>{activeFlow.name}</b></div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <Btn pri onClick={() => { setTab("quiz"); if (quiz.status === "idle") openLobby(); }}>▶ 퀴즈 세션 시작</Btn>
-                <Btn onClick={() => setTab("analytics")}>분석 보기</Btn>
-              </div>
-            </Card>
-            <Card style={{ background: "linear-gradient(135deg,#0E6B5B 0%,#0a5246 100%)", color: "#fff", border: "none" }}>
-              <div style={{ fontSize: 10.5, fontWeight: 900, letterSpacing: ".08em", opacity: .8, marginBottom: 6 }}>🎯 학기 성적 관리</div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>
-                  성적 반영 퀴즈 누적 <b style={{ fontSize: 16 }}>{semStats.graded}</b>개 · 활동 주차 <b style={{ fontSize: 16 }}>{semStats.weeks}</b>/15주<br />
-                  <span style={{ fontSize: 11, opacity: .8 }}>개인별 O/X 색상표·총점·평균·문항별 평균 포함</span>
+
+            {/* ===== 학기 대시보드 ===== */}
+            <div style={{ background: "#fff", border: "1.5px solid #d8d6cc", borderRadius: 14, boxShadow: "0 2px 0 #d8d6cc", overflow: "hidden" }}>
+              {/* 헤더 + KPI */}
+              <div style={{ padding: "14px 16px", borderBottom: "1.5px solid #eceade", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "#787b82" }}>교육공학의 이해 · 2026-2학기</div>
+                  <div style={{ fontSize: 16.5, fontWeight: 900 }}>학기 대시보드 <button onClick={refreshSem} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13 }} aria-label="새로고침">🔄</button></div>
                 </div>
-                <Btn sm onClick={exportGradedExcel} style={{ background: "#fff", borderColor: "#fff", color: "#0E6B5B" }}>📥 종합 Excel 내려받기</Btn>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[["진행", semKpi.act + "/15주", "#24272B"], ["성적반영 퀴즈", semKpi.graded + "개", "#0F6E56"], ["평균 참여", semKpi.avg + "명", "#24272B"]].map(([k, v, c], idx) => (
+                    <div key={idx} style={{ background: "#faf9f4", borderRadius: 10, padding: "7px 13px", textAlign: "center" }}>
+                      <div style={{ fontSize: 10, color: "#787b82" }}>{k}</div>
+                      <div style={{ fontSize: 15.5, fontWeight: 900, color: c }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </Card>
+              {/* 매트릭스 */}
+              <div style={{ padding: "8px 8px 4px", overflowX: "auto" }}>
+                <div style={{ fontSize: 11, color: "#787b82", padding: "2px 8px 6px" }}>주차 × 활동 매트릭스 — 행을 클릭하면 해당 주차로 전환됩니다</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 460 }}>
+                  <thead>
+                    <tr style={{ color: "#787b82", fontSize: 10.5 }}>
+                      <td style={{ width: 96, padding: "5px 8px" }}>주차</td>
+                      <td style={{ textAlign: "center" }}>🧩 플로우</td>
+                      <td style={{ textAlign: "center" }}>▶ 퀴즈</td>
+                      <td style={{ textAlign: "center" }}>📊 투표</td>
+                      <td style={{ textAlign: "center" }}>🚦 신호</td>
+                      <td style={{ textAlign: "center" }}>⏻ Exit</td>
+                      <td style={{ width: 66, textAlign: "center" }}>성적반영</td>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 15 }, (_, k) => k + 1).map(w => {
+                      const s = semWeek(w);
+                      const exam = w === 8 || w === 15;
+                      const cur = w === W;
+                      const base = w > W && s.empty ? "f" : "n";
+                      const cell = (on, alt) => on ? "g" : (alt ? "a" : base);
+                      if (exam && s.empty) return (
+                        <tr key={w} onClick={() => R("config/week").set(w)} style={{ borderTop: "1px solid #eceade", cursor: "pointer", background: cur ? "#E7F3EE" : undefined }}>
+                          <td style={{ padding: "7px 8px", color: "#b3402a", fontWeight: 700 }}>{cur ? "▶ " : ""}{w}주 {w === 8 ? "중간고사" : "기말고사"}</td>
+                          <td colSpan={5} style={{ textAlign: "center", background: "#FAECE7", color: "#993C1D", fontSize: 11 }}>평가 주간</td>
+                          <td style={{ textAlign: "center", color: "#a9aca7", fontSize: 11 }}>—</td>
+                        </tr>
+                      );
+                      return (
+                        <tr key={w} onClick={() => R("config/week").set(w)} style={{ borderTop: "1px solid #eceade", cursor: "pointer", background: cur ? "#E7F3EE" : undefined }}>
+                          <td style={{ padding: "7px 8px", fontWeight: cur ? 900 : 400, color: exam ? "#b3402a" : cur ? "#0F6E56" : "#55585f" }}>{cur ? "▶ " : ""}{w}주{exam ? (w === 8 ? " 중간" : " 기말") : ""}</td>
+                          <td style={{ textAlign: "center" }}><Dot st={cell(s.flowN > 0, false)} /></td>
+                          <td style={{ textAlign: "center" }}><Dot st={cell(s.quizN > 0, s.hasQuizBlock)} /></td>
+                          <td style={{ textAlign: "center" }}><Dot st={cell(s.pollY, false)} /></td>
+                          <td style={{ textAlign: "center" }}><Dot st={cell(s.sigN > 0, false)} /></td>
+                          <td style={{ textAlign: "center" }}><Dot st={cell(s.exitN > 0, false)} /></td>
+                          <td style={{ textAlign: "center" }}>{s.gradedN > 0 ? <span style={{ background: "#E1F5EE", color: "#085041", borderRadius: 10, padding: "1px 8px", fontSize: 10.5, fontWeight: 700 }}>{s.gradedN}개</span> : <span style={{ color: "#a9aca7", fontSize: 11 }}>—</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{ display: "flex", gap: 12, padding: "7px 8px 6px", fontSize: 10.5, color: "#787b82", flexWrap: "wrap" }}>
+                  <span><Dot st="g" /> 기록 있음</span>
+                  <span><Dot st="a" /> 준비됨(미실행)</span>
+                  <span><Dot st="n" /> 없음</span>
+                  <span><Dot st="f" /> 예정</span>
+                </div>
+              </div>
+              {/* 선택 주차 상세 + 빠른 실행 */}
+              <div style={{ borderTop: "1.5px solid #eceade", background: "#faf9f4", padding: "11px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12.5 }}>
+                  <b>{weekLabel(W)} 상세</b> <span style={{ color: "#787b82" }}>— {flowList.length ? activeFlow.name + " " + activeFlow.blocks.length + "단계" : "플로우 미설계"} · 참여 코드 <b style={{ fontFamily: "monospace", color: "#0F6E56" }}>{conf.joinCode}</b> · 접속 {playerCount}명</span>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <Btn sm onClick={() => setTab("flow")}>🧩 플로우 편집</Btn>
+                  <Btn pri sm onClick={() => { setTab("quiz"); if (quiz.status === "idle") openLobby(); }}>▶ 퀴즈 시작</Btn>
+                  <Btn sm onClick={() => setTab("analytics")}>📈 분석</Btn>
+                  <Btn sm onClick={exportGradedExcel}>📥 성적 Excel</Btn>
+                </div>
+              </div>
+            </div>
+
             <Card>
               <Label>실시간 이해도 (최근 30분 · {sigCounts.total}명)</Label>
               <div style={{ display: "flex", height: 26, borderRadius: 8, overflow: "hidden", border: "1.5px solid #24272B", fontSize: 11.5, fontWeight: 900 }}>
-                <div style={{ width: sigCounts.g+"%", background: "#BFE3CF", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.g?40:0 }}>{sigCounts.g>0 && "🟢"+sigCounts.g+"%"}</div>
-                <div style={{ width: sigCounts.y+"%", background: "#F6E7B2", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.y?40:0 }}>{sigCounts.y>0 && "🟡"+sigCounts.y+"%"}</div>
-                <div style={{ width: sigCounts.r+"%", background: "#F3C1B4", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.r?40:0 }}>{sigCounts.r>0 && "🔴"+sigCounts.r+"%"}</div>
+                <div style={{ width: sigCounts.g + "%", background: "#BFE3CF", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.g ? 40 : 0 }}>{sigCounts.g > 0 && "🟢" + sigCounts.g + "%"}</div>
+                <div style={{ width: sigCounts.y + "%", background: "#F6E7B2", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.y ? 40 : 0 }}>{sigCounts.y > 0 && "🟡" + sigCounts.y + "%"}</div>
+                <div style={{ width: sigCounts.r + "%", background: "#F3C1B4", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.r ? 40 : 0 }}>{sigCounts.r > 0 && "🔴" + sigCounts.r + "%"}</div>
                 {sigCounts.total === 0 && <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#a9aca7", fontWeight: 400 }}>아직 신호 없음</div>}
               </div>
               {sigCounts.r >= 30 && <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 900, color: "#b3402a" }}>⚠ '모르겠음' 30% 초과 — 추가 설명을 권장합니다</div>}
@@ -2975,7 +3030,7 @@ function App() {
                 <Btn sm onClick={changeCode}>참여 코드 변경</Btn>
                 <Btn sm onClick={changePin}>교수자 PIN 변경</Btn>
                 <Btn sm onClick={() => { setInstructorOk(false); setRole("student"); setTab("home"); }}>교수자 잠금</Btn>
-                <Btn sm onClick={resetAll} style={{ color: "#b3402a" }}>세션 데이터 초기화</Btn>
+                <Btn sm onClick={resetAll} style={{ color: "#b3402a" }}>이번 주 데이터 초기화</Btn>
               </div>
             </Card>
           </div>
