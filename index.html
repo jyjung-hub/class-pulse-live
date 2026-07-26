@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9.10";
+const APP_VERSION = "LIVE 2.9.11";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2824,6 +2824,11 @@ function App() {
     RW("flows/" + runFlow.id + "/blocks").set(a);
     if (idx !== -1 && session.step >= a.length) RW("session/step").set(Math.max(0, a.length - 1));
   });
+  const jumpToStep = k => {
+    if (!runFlow || !session || k === session.step) return;
+    RW("session/stepLog/" + k).set(serverNow());
+    RW("session/step").set(k);
+  };
 
   /* ---------- 즉석 투표 (POL) ---------- */
   const pollVotes = (poll && poll.votes) || {};
@@ -3409,7 +3414,7 @@ function App() {
   // 교수자가 (재)접속했을 때 착지할 탭 — 수업이 진행 중이면 학기 대시보드 대신 현재 활동 화면으로
   const landingTab = () => {
     if (!runFlow || !runBlock) return "home";
-    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "home";
+    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "analytics";
   };
   const gotoLanding = () => {
     if (runFlow) setActiveFlow(runFlow.id); // 플로우 상세는 항상 전역에 표시되므로 진행 중인 플로우로 선택 동기화
@@ -3617,12 +3622,12 @@ function App() {
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontFamily: "monospace", fontSize: 10, color: "#0E6B5B", fontWeight: 700, minWidth: 30 }}>{s.type}</span>
-                      <span style={{ flex: 1, fontSize: 13, minWidth: 140 }}>
+                      <button onClick={() => jumpToStep(k)} title="이 단계로 바로 이동" style={{ flex: 1, fontSize: 13, minWidth: 140, textAlign: "left", border: "none", background: "none", padding: 0, cursor: isCur ? "default" : "pointer", fontFamily: "inherit", color: "inherit" }}>
                         {k + 1}. {s.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {s.dur}</span>
                         {liveBlock?.setId && questionSets?.[liveBlock.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[liveBlock.setId].name}</span>}
                         {liveBlock?.link && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗링크</span>}
                         {isCur && <span style={{ color: "#fff", background: "#0E6B5B", borderRadius: 5, fontSize: 10, fontWeight: 900, padding: "1px 6px", marginLeft: 6 }}>▶ 진행 중</span>}
-                      </span>
+                      </button>
                       <span style={{ fontSize: 11, fontFamily: "monospace", color: "#787b82", whiteSpace: "nowrap" }}>
                         계획 {s.plan !== null ? s.plan + "분" : s.dur} · 실제 {s.actual !== null ? s.actual + "분" : "—"}{" "}
                         <span style={{ fontWeight: 700, color: s.diff === null ? "#a9aca7" : s.diff > 5 ? "#b3402a" : s.diff < -5 ? "#BA7517" : "#0F6E56" }}>({s.diff === null ? "—" : (s.diff > 0 ? "+" : "") + s.diff + "분"})</span>
@@ -3829,16 +3834,6 @@ function App() {
               </div>
             </div>
 
-            <Card>
-              <Label>실시간 이해도 (최근 30분 · {sigCounts.total}명)</Label>
-              <div style={{ display: "flex", height: 26, borderRadius: 8, overflow: "hidden", border: "1.5px solid #24272B", fontSize: 11.5, fontWeight: 900 }}>
-                <div style={{ width: sigCounts.g + "%", background: "#BFE3CF", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.g ? 40 : 0 }}>{sigCounts.g > 0 && "🟢" + sigCounts.g + "%"}</div>
-                <div style={{ width: sigCounts.y + "%", background: "#F6E7B2", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.y ? 40 : 0 }}>{sigCounts.y > 0 && "🟡" + sigCounts.y + "%"}</div>
-                <div style={{ width: sigCounts.r + "%", background: "#F3C1B4", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.r ? 40 : 0 }}>{sigCounts.r > 0 && "🔴" + sigCounts.r + "%"}</div>
-                {sigCounts.total === 0 && <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#a9aca7", fontWeight: 400 }}>아직 신호 없음</div>}
-              </div>
-              {sigCounts.r >= 30 && <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 900, color: "#b3402a" }}>⚠ '모르겠음' 30% 초과 — 추가 설명을 권장합니다</div>}
-            </Card>
             <Card>
               <Label>설정</Label>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -4304,7 +4299,7 @@ function App() {
                 </Card>
               )
             )}
-            {!isInstructor ? (
+            {!isInstructor && (
               <Card>
                 <Label>지금 강의, 어느 정도 이해되나요? (익명 집계)</Label>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, margin: "8px 0" }}>
@@ -4317,40 +4312,7 @@ function App() {
                 </div>
                 <div style={{ fontSize: 10.5, color: "#787b82", textAlign: "center" }}>익명으로 집계됩니다 · 언제든 변경 가능</div>
               </Card>
-            ) : (
-              <Card>
-                <Label>실시간 이해도 (최근 30분 · {sigCounts.total}명)</Label>
-                <div style={{ display: "flex", height: 30, borderRadius: 8, overflow: "hidden", border: "1.5px solid #24272B", fontSize: 12, fontWeight: 900 }}>
-                  <div style={{ width: sigCounts.g+"%", background: "#BFE3CF", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.g?44:0 }}>{sigCounts.g>0 && "🟢 "+sigCounts.g+"%"}</div>
-                  <div style={{ width: sigCounts.y+"%", background: "#F6E7B2", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.y?44:0 }}>{sigCounts.y>0 && "🟡 "+sigCounts.y+"%"}</div>
-                  <div style={{ width: sigCounts.r+"%", background: "#F3C1B4", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.r?44:0 }}>{sigCounts.r>0 && "🔴 "+sigCounts.r+"%"}</div>
-                  {sigCounts.total === 0 && <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#a9aca7", fontWeight: 400 }}>아직 신호 없음</div>}
-                </div>
-                {sigCounts.r >= 30 && <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 900, color: "#b3402a" }}>⚠ '모르겠음' 30% 초과 — 추가 설명을 권장합니다</div>}
-              </Card>
             )}
-            <Card>
-              <Label>익명 질문함 (공감순)</Label>
-              {!isInstructor && (
-                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-                  <input value={qDraft} onChange={e => setQDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && postQuestion()}
-                    placeholder="✋ 익명으로 질문하기…" className="inp" style={{ flex: 1 }} />
-                  <Btn pri onClick={postQuestion}>등록</Btn>
-                </div>
-              )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {Object.entries(questionsQ || {}).map(([id, q]) => ({ id, ...q, voteN: Object.keys(q.votes||{}).length, voted: !!(q.votes||{})[me.id] }))
-                  .sort((a, b) => b.voteN - a.voteN)
-                  .map(q => (
-                    <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 8, border: "1.5px solid #d8d6cc", borderRadius: 9, padding: "8px 10px" }}>
-                      <span style={{ flex: 1, fontSize: 13 }}>{q.text}</span>
-                      <button onClick={() => voteQuestion(q.id, q.voted)} className={"cpb sm"}
-                        style={{ background: q.voted ? "#0E6B5B" : "#fff", color: q.voted ? "#fff" : "#24272B", borderColor: q.voted ? "#0E6B5B" : "#24272B" }}>▲ {q.voteN}</button>
-                    </div>
-                  ))}
-                {Object.keys(questionsQ || {}).length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "10px 0" }}>아직 질문이 없습니다.</div>}
-              </div>
-            </Card>
           </div>
         )}
 
@@ -4668,6 +4630,42 @@ function App() {
             </React.Fragment>)}
           </div>
         )}
+
+        {/* ==================== 하단 공통 (모든 화면 맨 아래) ==================== */}
+        {isInstructor && (
+          <Card style={{ marginTop: 12 }}>
+            <Label>실시간 이해도 (최근 30분 · {sigCounts.total}명)</Label>
+            <div style={{ display: "flex", height: 26, borderRadius: 8, overflow: "hidden", border: "1.5px solid #24272B", fontSize: 11.5, fontWeight: 900 }}>
+              <div style={{ width: sigCounts.g + "%", background: "#BFE3CF", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.g ? 40 : 0 }}>{sigCounts.g > 0 && "🟢" + sigCounts.g + "%"}</div>
+              <div style={{ width: sigCounts.y + "%", background: "#F6E7B2", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.y ? 40 : 0 }}>{sigCounts.y > 0 && "🟡" + sigCounts.y + "%"}</div>
+              <div style={{ width: sigCounts.r + "%", background: "#F3C1B4", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.r ? 40 : 0 }}>{sigCounts.r > 0 && "🔴" + sigCounts.r + "%"}</div>
+              {sigCounts.total === 0 && <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#a9aca7", fontWeight: 400 }}>아직 신호 없음</div>}
+            </div>
+            {sigCounts.r >= 30 && <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 900, color: "#b3402a" }}>⚠ '모르겠음' 30% 초과 — 추가 설명을 권장합니다</div>}
+          </Card>
+        )}
+        <Card style={{ marginTop: 12 }}>
+          <Label>익명 질문함 (공감순)</Label>
+          {!isInstructor && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <input value={qDraft} onChange={e => setQDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && postQuestion()}
+                placeholder="✋ 익명으로 질문하기…" className="inp" style={{ flex: 1 }} />
+              <Btn pri onClick={postQuestion}>등록</Btn>
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {Object.entries(questionsQ || {}).map(([id, q]) => ({ id, ...q, voteN: Object.keys(q.votes||{}).length, voted: !!(q.votes||{})[me.id] }))
+              .sort((a, b) => b.voteN - a.voteN)
+              .map(q => (
+                <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 8, border: "1.5px solid #d8d6cc", borderRadius: 9, padding: "8px 10px" }}>
+                  <span style={{ flex: 1, fontSize: 13 }}>{q.text}</span>
+                  <button onClick={() => voteQuestion(q.id, q.voted)} className={"cpb sm"}
+                    style={{ background: q.voted ? "#0E6B5B" : "#fff", color: q.voted ? "#fff" : "#24272B", borderColor: q.voted ? "#0E6B5B" : "#24272B" }}>▲ {q.voteN}</button>
+                </div>
+              ))}
+            {Object.keys(questionsQ || {}).length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "10px 0" }}>아직 질문이 없습니다.</div>}
+          </div>
+        </Card>
       </main>
 
       {/* ---------- 하단 탭 ---------- */}
