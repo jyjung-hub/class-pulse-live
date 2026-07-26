@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9.9";
+const APP_VERSION = "LIVE 2.9.10";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -3409,12 +3409,11 @@ function App() {
   // 교수자가 (재)접속했을 때 착지할 탭 — 수업이 진행 중이면 학기 대시보드 대신 현재 활동 화면으로
   const landingTab = () => {
     if (!runFlow || !runBlock) return "home";
-    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "flow";
+    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "home";
   };
   const gotoLanding = () => {
-    const t = landingTab();
-    if (t === "flow" && runFlow) setActiveFlow(runFlow.id);
-    setTab(t);
+    if (runFlow) setActiveFlow(runFlow.id); // 플로우 상세는 항상 전역에 표시되므로 진행 중인 플로우로 선택 동기화
+    setTab(landingTab());
   };
   const verifyPin = () => {
     if (pinDraft.trim() !== (conf.pin || "1234")) { setPinDraft(""); return notify("PIN이 일치하지 않습니다."); }
@@ -3446,7 +3445,7 @@ function App() {
   })();
 
   const TABS = isInstructor
-    ? [["home","홈","🏠"],["flow","플로우","🧩"],["quiz","퀴즈","▶"],["signal","신호등","🚦"],["exit","Exit","⏻"],["analytics","분석","📊"]]
+    ? [["home","홈","🏠"],["quiz","퀴즈","▶"],["signal","신호등","🚦"],["exit","Exit","⏻"],["analytics","분석","📊"]]
     : [["home","홈","🏠"],["quiz","퀴즈","▶"],["signal","신호등","🚦"],["exit","Exit","⏻"]];
 
   /* ============================ RENDER ============================ */
@@ -3479,6 +3478,53 @@ function App() {
           <div className="fade" style={{ background: "#FBEAE5", border: "1.5px solid #b3402a", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#7c2d1c", marginBottom: 12 }}>
             <b>🔴 서버와 연결이 끊겼습니다.</b> 네트워크를 확인해 주세요. 연결되면 자동 복구됩니다.
           </div>
+        )}
+
+        {/* ==================== 주차 이동 바 (교수자 · 모든 화면) ==================== */}
+        {isInstructor && (
+          <div className="fade" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#fff", border: "1.5px solid #d8d6cc", borderRadius: 12, padding: "8px 10px", marginBottom: 12, boxShadow: "0 2px 0 #d8d6cc" }}>
+            <Btn sm disabled={W <= 1} onClick={() => R("config/week").set(W - 1)}>◀ 이전 주</Btn>
+            <select value={W} onChange={e => R("config/week").set(Number(e.target.value))} className="inp" style={{ fontWeight: 900, textAlign: "center", minWidth: 130 }}>
+              {Array.from({ length: 15 }, (_, i) => i + 1).map(w => <option key={w} value={w}>{weekLabel(w)}{w === 8 || w === 15 ? " 🎓" : ""}</option>)}
+            </select>
+            <Btn sm disabled={W >= 15} onClick={() => R("config/week").set(W + 1)}>다음 주 ▶</Btn>
+          </div>
+        )}
+
+        {isExamWeek && (
+          <Card style={{ marginBottom: 12, background: "#faf3ee", border: "1.5px solid #b3402a" }}>
+            <div style={{ fontSize: 13.5, fontWeight: 900, color: "#b3402a" }}>🎓 {W === 8 ? "중간고사" : "기말고사"} 주간입니다</div>
+            <div style={{ fontSize: 12, color: "#7c2d1c", marginTop: 3 }}>이번 주는 평가 주간입니다. 필요 시 활동 기능은 그대로 사용할 수 있습니다.</div>
+          </Card>
+        )}
+
+        {/* ==================== 플로우 선택 (교수자 · 모든 화면) ==================== */}
+        {isInstructor && (
+          <Card style={{ marginBottom: 12 }}>
+            <Label>{weekLabel(W)}차 플로우 ({flowList.length}) — 이 주차 전용으로 관리됩니다</Label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {flowList.map(f => {
+                const on = f.id === activeFlow.id;
+                return (
+                  <button key={f.id} onClick={() => setActiveFlow(f.id)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, border: "2px solid " + (on ? "#0E6B5B" : "#d8d6cc"), background: on ? "#e7f3ee" : "#fff", borderRadius: 9, padding: "9px 11px", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+                    <span style={{ fontWeight: 900, fontSize: 13 }}>{on ? "●" : "○"}</span>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: on ? 900 : 500 }}>{f.name}</span>
+                    <span style={{ fontSize: 10.5, background: "#faf9f4", border: "1px solid #d8d6cc", borderRadius: 20, padding: "2px 9px", color: "#55585f" }}>{f.method}</span>
+                    <span style={{ fontSize: 11, color: "#787b82" }}>{f.blocks.length}단계</span>
+                  </button>
+                );
+              })}
+              {flowList.length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "8px 0" }}>아직 플로우가 없습니다 — 아래 템플릿으로 시작해 보세요.</div>}
+            </div>
+            <div style={{ borderTop: "1px dashed #d8d6cc", marginTop: 10, paddingTop: 10 }}>
+              <Label>새 플로우 만들기</Label>
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                <Btn sm onClick={newFlowEmpty}>+ 빈 플로우</Btn>
+                {Object.keys(FLOW_TEMPLATES).map(t => <Btn sm key={t} onClick={() => newFlowFromTemplate(t)}>📋 {t}</Btn>)}
+              </div>
+            </div>
+          </Card>
         )}
 
         {/* ==================== 플로우 진행 배너 ==================== */}
@@ -3594,22 +3640,109 @@ function App() {
           </Card>
         )}
 
-        {isExamWeek && (
-          <Card style={{ marginBottom: 12, background: "#faf3ee", border: "1.5px solid #b3402a" }}>
-            <div style={{ fontSize: 13.5, fontWeight: 900, color: "#b3402a" }}>🎓 {W === 8 ? "중간고사" : "기말고사"} 주간입니다</div>
-            <div style={{ fontSize: 12, color: "#7c2d1c", marginTop: 3 }}>이번 주는 평가 주간입니다. 필요 시 활동 기능은 그대로 사용할 수 있습니다.</div>
+        {/* ==================== 플로우 상세 편집 (교수자 · 모든 화면) ==================== */}
+        {isInstructor && flowList.length > 0 && (
+          <Card style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+              <div style={{ fontWeight: 900, fontSize: 14 }}>✏️ {activeFlow.name}</div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {!runFlow && <Btn pri sm onClick={startFlowSession}>▶ 이 플로우로 수업 시작</Btn>}
+                <Btn sm onClick={renameFlow}>이름 변경</Btn>
+                <Btn sm onClick={dupFlow}>복제</Btn>
+                <Btn sm onClick={delFlow} style={{ color: "#b3402a" }}>삭제</Btn>
+              </div>
+            </div>
+            {FLOW_TEMPLATES[activeFlow.method] && <div style={{ fontSize: 11, color: "#787b82", marginBottom: 10 }}>ⓘ {activeFlow.method}: {FLOW_TEMPLATES[activeFlow.method].desc}</div>}
+            {runFlow && runFlow.id === activeFlow.id ? (
+              <div style={{ fontSize: 12.5, color: "#787b82", background: "#F7F6F0", borderRadius: 9, padding: "10px 12px" }}>
+                ⓘ 이 플로우는 지금 진행 중입니다 — 단계 목록·순서·내용은 위쪽의 <b>"● 진행 중 (실시간)"</b> 표에서 바로 관리할 수 있습니다.
+              </div>
+            ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {activeFlow.blocks.map((f, i) => {
+                const isLive = runFlow && runFlow.id === activeFlow.id && session?.step === i;
+                return (
+                <div key={f.id} style={{ border: isLive ? "1.5px solid #0E6B5B" : "1.5px solid #d8d6cc", borderRadius: 9, padding: "8px 10px", background: isLive ? "#EAF5F1" : "#fff" }}>
+                  {editBlock?.id === f.id ? (
+                    <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input value={editBlock.title} onChange={e => setEditBlock(s => ({ ...s, title: e.target.value }))} placeholder="활동 제목" className="inp" style={{ flex: 2 }} />
+                        <input value={editBlock.dur} onChange={e => setEditBlock(s => ({ ...s, dur: e.target.value }))} placeholder="시간 (예: 10분)" className="inp" style={{ flex: 1 }} />
+                      </div>
+                      {LINKABLE.includes(activeFlow.blocks.find(x => x.id === editBlock.id)?.type) && (
+                        <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <textarea rows={2} value={editBlock.guide || ""} onChange={e => setEditBlock(s => ({ ...s, guide: e.target.value }))} placeholder="학생 안내문" className="inp" style={{ resize: "vertical" }} />
+                          <input value={editBlock.link || ""} onChange={e => setEditBlock(s => ({ ...s, link: e.target.value }))} placeholder="외부 도구 링크 (Notion·Google Docs·Padlet 등 https://…)" className="inp" />
+                        </div>
+                      )}
+                      {activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "POL" && (
+                        <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ fontSize: 11, color: "#787b82" }}>📊 투표 질문·보기 (블록 저장 — 수업 중 [이 단계 투표 열기] 시 자동 입력됩니다)</div>
+                          <input value={editBlock.pollQ || ""} onChange={e => setEditBlock(s => ({ ...s, pollQ: e.target.value }))} placeholder="투표 질문 (예: 사전학습, 해보니 어땠나요?)" className="inp" />
+                          <textarea rows={3} value={editBlock.pollC || ""} onChange={e => setEditBlock(s => ({ ...s, pollC: e.target.value }))} placeholder="보기를 한 줄에 하나씩 (2~5개)" className="inp" style={{ resize: "vertical" }} />
+                        </div>
+                      )}
+                      {(activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "QZG" || activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "QZS") && (
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <span style={{ fontSize: 11.5, color: "#787b82", whiteSpace: "nowrap" }}>🔗 연동 문항 세트</span>
+                          <select value={editBlock.setId || ""} onChange={e => setEditBlock(s => ({ ...s, setId: e.target.value }))} className="inp" style={{ flex: 1 }}>
+                            <option value="">(선택 안 함 — 현재 세트 사용)</option>
+                            {setsList.map(s => <option key={s.id} value={s.id}>{s.name} ({s.questions.length}문항)</option>)}
+                          </select>
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 5 }}>
+                        <Btn pri sm onClick={blockSave}>저장</Btn>
+                        <Btn sm onClick={() => setEditBlock(null)}>취소</Btn>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontFamily: "monospace", fontSize: 10, color: "#0E6B5B", fontWeight: 700, minWidth: 30 }}>{f.type}</span>
+                      <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span>{f.setId && questionSets?.[f.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[f.setId].name}</span>}{f.type === "POL" && f.poll && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 📊{f.poll.q}</span>}{f.link && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗링크</span>}{isLive && <span style={{ color: "#fff", background: "#0E6B5B", borderRadius: 5, fontSize: 10, fontWeight: 900, padding: "1px 6px", marginLeft: 6 }}>▶ 진행 중</span>}</span>
+                      <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur, setId: f.setId || "", pollQ: (f.poll && f.poll.q) || "", pollC: ((f.poll && f.poll.choices) || []).join("\n"), guide: f.guide || "", link: f.link || "" })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
+                      <button onClick={() => blockMove(i, -1)} disabled={i === 0} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === 0 ? .25 : 1 }} aria-label="위로">↑</button>
+                      <button onClick={() => blockMove(i, 1)} disabled={i === activeFlow.blocks.length - 1} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === activeFlow.blocks.length - 1 ? .25 : 1 }} aria-label="아래로">↓</button>
+                      <button onClick={() => blockDel(f.id)} style={{ border: "none", background: "none", color: "#b3402a", fontSize: 13, cursor: "pointer" }} aria-label="삭제">✕</button>
+                    </div>
+                  )}
+                </div>
+              )})}
+              {activeFlow.blocks.length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "10px 0" }}>아래에서 활동을 추가해 플로우를 구성하세요.</div>}
+            </div>
+            )}
+            <div style={{ borderTop: "1px dashed #d8d6cc", marginTop: 10, paddingTop: 10 }}>
+              <Label>활동 추가</Label>
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                {Object.entries(ACT_TYPES).map(([k, v]) => <Btn key={k} sm onClick={() => blockAdd(k)}>+ {v}</Btn>)}
+              </div>
+              <div style={{ fontSize: 10.5, color: "#787b82", margin: "10px 0 4px", fontWeight: 900, letterSpacing: ".06em" }}>내 활동 (학기 공통 라이브러리)</div>
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                {actsList.map(x => (
+                  <span key={x.id} style={{ display: "inline-flex", alignItems: "center", border: "1.5px solid #24272B", borderRadius: 8, overflow: "hidden" }}>
+                    <button onClick={() => blockAddCustom(x)} style={{ border: "none", background: "#fff", padding: "4px 8px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ 📌 {x.name}{x.link ? " 🔗" : ""}</button>
+                    <button onClick={() => delAct(x.id, x.name)} aria-label="라이브러리에서 삭제" style={{ border: "none", borderLeft: "1px solid #d8d6cc", background: "#faf9f4", padding: "4px 6px", fontSize: 10.5, color: "#b3402a", cursor: "pointer" }}>✕</button>
+                  </span>
+                ))}
+                <Btn sm pri onClick={() => setNewAct({ name: "", dur: "10분", guide: "", link: "" })}>＋ 직접 만들기</Btn>
+              </div>
+              {newAct && (
+                <div className="fade" style={{ border: "1.5px solid #d8d6cc", borderRadius: 10, padding: 12, marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input value={newAct.name} onChange={e => setNewAct(s => ({ ...s, name: e.target.value }))} placeholder="활동 이름 (예: 갤러리 워크)" className="inp" style={{ flex: 2 }} />
+                    <input value={newAct.dur} onChange={e => setNewAct(s => ({ ...s, dur: e.target.value }))} placeholder="시간" className="inp" style={{ flex: 1 }} />
+                  </div>
+                  <textarea rows={2} value={newAct.guide} onChange={e => setNewAct(s => ({ ...s, guide: e.target.value }))} placeholder="학생 안내문 — 수업 중 이 단계가 되면 학생 화면에 표시됩니다" className="inp" style={{ resize: "vertical" }} />
+                  <input value={newAct.link} onChange={e => setNewAct(s => ({ ...s, link: e.target.value }))} placeholder="자료 링크 (선택 · https://… — 학생에게 [활동 열기] 버튼으로 표시)" className="inp" />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <Btn pri sm onClick={saveNewAct}>저장하고 플로우에 추가</Btn>
+                    <Btn sm onClick={() => setNewAct(null)}>취소</Btn>
+                  </div>
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: "#787b82", marginTop: 8 }}>ⓘ 신호등(SIG)은 별도 배치 없이도 세션 전체에 상시 가동됩니다. 플로우는 실시간으로 저장·공유됩니다.</div>
+            </div>
           </Card>
-        )}
-
-        {/* ==================== 주차 이동 바 (교수자 · 활동 탭) ==================== */}
-        {isInstructor && tab !== "home" && (
-          <div className="fade" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#fff", border: "1.5px solid #d8d6cc", borderRadius: 12, padding: "8px 10px", marginBottom: 12, boxShadow: "0 2px 0 #d8d6cc" }}>
-            <Btn sm disabled={W <= 1} onClick={() => R("config/week").set(W - 1)}>◀ 이전 주</Btn>
-            <select value={W} onChange={e => R("config/week").set(Number(e.target.value))} className="inp" style={{ fontWeight: 900, textAlign: "center", minWidth: 130 }}>
-              {Array.from({ length: 15 }, (_, i) => i + 1).map(w => <option key={w} value={w}>{weekLabel(w)}{w === 8 || w === 15 ? " 🎓" : ""}</option>)}
-            </select>
-            <Btn sm disabled={W >= 15} onClick={() => R("config/week").set(W + 1)}>다음 주 ▶</Btn>
-          </div>
         )}
 
         {/* ==================== HOME ==================== */}
@@ -3689,7 +3822,6 @@ function App() {
                   <b>{weekLabel(W)} 상세</b> <span style={{ color: "#787b82" }}>— {flowList.length ? activeFlow.name + " " + activeFlow.blocks.length + "단계" : "플로우 미설계"} · 참여 코드 <b style={{ fontFamily: "monospace", color: "#0F6E56" }}>{conf.joinCode}</b> · 접속 {playerCount}명</span>
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <Btn sm onClick={() => setTab("flow")}>🧩 플로우 편집</Btn>
                   <Btn pri sm onClick={() => { setTab("quiz"); if (quiz.status === "idle") openLobby(); }}>▶ 퀴즈 시작</Btn>
                   <Btn sm onClick={() => setTab("analytics")}>📈 분석</Btn>
                   <Btn sm onClick={exportGradedExcel}>📥 성적 Excel</Btn>
@@ -3783,140 +3915,6 @@ function App() {
             </Card>
           </div>
         ))}
-
-        {/* ==================== FLOW ==================== */}
-        {tab === "flow" && isInstructor && (
-          <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Card>
-              <Label>{weekLabel(W)}차 플로우 ({flowList.length}) — 이 주차 전용으로 관리됩니다</Label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {flowList.map(f => {
-                  const on = f.id === activeFlow.id;
-                  return (
-                    <button key={f.id} onClick={() => setActiveFlow(f.id)}
-                      style={{ display: "flex", alignItems: "center", gap: 8, border: "2px solid " + (on ? "#0E6B5B" : "#d8d6cc"), background: on ? "#e7f3ee" : "#fff", borderRadius: 9, padding: "9px 11px", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
-                      <span style={{ fontWeight: 900, fontSize: 13 }}>{on ? "●" : "○"}</span>
-                      <span style={{ flex: 1, fontSize: 13, fontWeight: on ? 900 : 500 }}>{f.name}</span>
-                      <span style={{ fontSize: 10.5, background: "#faf9f4", border: "1px solid #d8d6cc", borderRadius: 20, padding: "2px 9px", color: "#55585f" }}>{f.method}</span>
-                      <span style={{ fontSize: 11, color: "#787b82" }}>{f.blocks.length}단계</span>
-                    </button>
-                  );
-                })}
-                {flowList.length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "8px 0" }}>아직 플로우가 없습니다 — 아래 템플릿으로 시작해 보세요.</div>}
-              </div>
-              <div style={{ borderTop: "1px dashed #d8d6cc", marginTop: 10, paddingTop: 10 }}>
-                <Label>새 플로우 만들기</Label>
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                  <Btn sm onClick={newFlowEmpty}>+ 빈 플로우</Btn>
-                  {Object.keys(FLOW_TEMPLATES).map(t => <Btn sm key={t} onClick={() => newFlowFromTemplate(t)}>📋 {t}</Btn>)}
-                </div>
-              </div>
-            </Card>
-            {flowList.length > 0 && (
-              <Card>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
-                  <div style={{ fontWeight: 900, fontSize: 14 }}>✏️ {activeFlow.name}</div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {!runFlow && <Btn pri sm onClick={startFlowSession}>▶ 이 플로우로 수업 시작</Btn>}
-                    <Btn sm onClick={renameFlow}>이름 변경</Btn>
-                    <Btn sm onClick={dupFlow}>복제</Btn>
-                    <Btn sm onClick={delFlow} style={{ color: "#b3402a" }}>삭제</Btn>
-                  </div>
-                </div>
-                {FLOW_TEMPLATES[activeFlow.method] && <div style={{ fontSize: 11, color: "#787b82", marginBottom: 10 }}>ⓘ {activeFlow.method}: {FLOW_TEMPLATES[activeFlow.method].desc}</div>}
-                {runFlow && runFlow.id === activeFlow.id ? (
-                  <div style={{ fontSize: 12.5, color: "#787b82", background: "#F7F6F0", borderRadius: 9, padding: "10px 12px" }}>
-                    ⓘ 이 플로우는 지금 진행 중입니다 — 단계 목록·순서·내용은 화면 상단의 <b>"● 진행 중 (실시간)"</b> 표에서 바로 관리할 수 있습니다 (모든 탭 공통으로 표시됩니다).
-                  </div>
-                ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                  {activeFlow.blocks.map((f, i) => {
-                    const isLive = runFlow && runFlow.id === activeFlow.id && session?.step === i;
-                    return (
-                    <div key={f.id} style={{ border: isLive ? "1.5px solid #0E6B5B" : "1.5px solid #d8d6cc", borderRadius: 9, padding: "8px 10px", background: isLive ? "#EAF5F1" : "#fff" }}>
-                      {editBlock?.id === f.id ? (
-                        <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <input value={editBlock.title} onChange={e => setEditBlock(s => ({ ...s, title: e.target.value }))} placeholder="활동 제목" className="inp" style={{ flex: 2 }} />
-                            <input value={editBlock.dur} onChange={e => setEditBlock(s => ({ ...s, dur: e.target.value }))} placeholder="시간 (예: 10분)" className="inp" style={{ flex: 1 }} />
-                          </div>
-                          {LINKABLE.includes(activeFlow.blocks.find(x => x.id === editBlock.id)?.type) && (
-                            <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                              <textarea rows={2} value={editBlock.guide || ""} onChange={e => setEditBlock(s => ({ ...s, guide: e.target.value }))} placeholder="학생 안내문" className="inp" style={{ resize: "vertical" }} />
-                              <input value={editBlock.link || ""} onChange={e => setEditBlock(s => ({ ...s, link: e.target.value }))} placeholder="외부 도구 링크 (Notion·Google Docs·Padlet 등 https://…)" className="inp" />
-                            </div>
-                          )}
-                          {activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "POL" && (
-                            <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                              <div style={{ fontSize: 11, color: "#787b82" }}>📊 투표 질문·보기 (블록 저장 — 수업 중 [이 단계 투표 열기] 시 자동 입력됩니다)</div>
-                              <input value={editBlock.pollQ || ""} onChange={e => setEditBlock(s => ({ ...s, pollQ: e.target.value }))} placeholder="투표 질문 (예: 사전학습, 해보니 어땠나요?)" className="inp" />
-                              <textarea rows={3} value={editBlock.pollC || ""} onChange={e => setEditBlock(s => ({ ...s, pollC: e.target.value }))} placeholder="보기를 한 줄에 하나씩 (2~5개)" className="inp" style={{ resize: "vertical" }} />
-                            </div>
-                          )}
-                          {(activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "QZG" || activeFlow.blocks.find(x => x.id === editBlock.id)?.type === "QZS") && (
-                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                              <span style={{ fontSize: 11.5, color: "#787b82", whiteSpace: "nowrap" }}>🔗 연동 문항 세트</span>
-                              <select value={editBlock.setId || ""} onChange={e => setEditBlock(s => ({ ...s, setId: e.target.value }))} className="inp" style={{ flex: 1 }}>
-                                <option value="">(선택 안 함 — 현재 세트 사용)</option>
-                                {setsList.map(s => <option key={s.id} value={s.id}>{s.name} ({s.questions.length}문항)</option>)}
-                              </select>
-                            </div>
-                          )}
-                          <div style={{ display: "flex", gap: 5 }}>
-                            <Btn pri sm onClick={blockSave}>저장</Btn>
-                            <Btn sm onClick={() => setEditBlock(null)}>취소</Btn>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontFamily: "monospace", fontSize: 10, color: "#0E6B5B", fontWeight: 700, minWidth: 30 }}>{f.type}</span>
-                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span>{f.setId && questionSets?.[f.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[f.setId].name}</span>}{f.type === "POL" && f.poll && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 📊{f.poll.q}</span>}{f.link && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗링크</span>}{isLive && <span style={{ color: "#fff", background: "#0E6B5B", borderRadius: 5, fontSize: 10, fontWeight: 900, padding: "1px 6px", marginLeft: 6 }}>▶ 진행 중</span>}</span>
-                          <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur, setId: f.setId || "", pollQ: (f.poll && f.poll.q) || "", pollC: ((f.poll && f.poll.choices) || []).join("\n"), guide: f.guide || "", link: f.link || "" })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
-                          <button onClick={() => blockMove(i, -1)} disabled={i === 0} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === 0 ? .25 : 1 }} aria-label="위로">↑</button>
-                          <button onClick={() => blockMove(i, 1)} disabled={i === activeFlow.blocks.length - 1} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === activeFlow.blocks.length - 1 ? .25 : 1 }} aria-label="아래로">↓</button>
-                          <button onClick={() => blockDel(f.id)} style={{ border: "none", background: "none", color: "#b3402a", fontSize: 13, cursor: "pointer" }} aria-label="삭제">✕</button>
-                        </div>
-                      )}
-                    </div>
-                  )})}
-                  {activeFlow.blocks.length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "10px 0" }}>아래에서 활동을 추가해 플로우를 구성하세요.</div>}
-                </div>
-                )}
-                <div style={{ borderTop: "1px dashed #d8d6cc", marginTop: 10, paddingTop: 10 }}>
-                  <Label>활동 추가</Label>
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                    {Object.entries(ACT_TYPES).map(([k, v]) => <Btn key={k} sm onClick={() => blockAdd(k)}>+ {v}</Btn>)}
-                  </div>
-                  <div style={{ fontSize: 10.5, color: "#787b82", margin: "10px 0 4px", fontWeight: 900, letterSpacing: ".06em" }}>내 활동 (학기 공통 라이브러리)</div>
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                    {actsList.map(x => (
-                      <span key={x.id} style={{ display: "inline-flex", alignItems: "center", border: "1.5px solid #24272B", borderRadius: 8, overflow: "hidden" }}>
-                        <button onClick={() => blockAddCustom(x)} style={{ border: "none", background: "#fff", padding: "4px 8px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ 📌 {x.name}{x.link ? " 🔗" : ""}</button>
-                        <button onClick={() => delAct(x.id, x.name)} aria-label="라이브러리에서 삭제" style={{ border: "none", borderLeft: "1px solid #d8d6cc", background: "#faf9f4", padding: "4px 6px", fontSize: 10.5, color: "#b3402a", cursor: "pointer" }}>✕</button>
-                      </span>
-                    ))}
-                    <Btn sm pri onClick={() => setNewAct({ name: "", dur: "10분", guide: "", link: "" })}>＋ 직접 만들기</Btn>
-                  </div>
-                  {newAct && (
-                    <div className="fade" style={{ border: "1.5px solid #d8d6cc", borderRadius: 10, padding: 12, marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <input value={newAct.name} onChange={e => setNewAct(s => ({ ...s, name: e.target.value }))} placeholder="활동 이름 (예: 갤러리 워크)" className="inp" style={{ flex: 2 }} />
-                        <input value={newAct.dur} onChange={e => setNewAct(s => ({ ...s, dur: e.target.value }))} placeholder="시간" className="inp" style={{ flex: 1 }} />
-                      </div>
-                      <textarea rows={2} value={newAct.guide} onChange={e => setNewAct(s => ({ ...s, guide: e.target.value }))} placeholder="학생 안내문 — 수업 중 이 단계가 되면 학생 화면에 표시됩니다" className="inp" style={{ resize: "vertical" }} />
-                      <input value={newAct.link} onChange={e => setNewAct(s => ({ ...s, link: e.target.value }))} placeholder="자료 링크 (선택 · https://… — 학생에게 [활동 열기] 버튼으로 표시)" className="inp" />
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <Btn pri sm onClick={saveNewAct}>저장하고 플로우에 추가</Btn>
-                        <Btn sm onClick={() => setNewAct(null)}>취소</Btn>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </Card>
-            )}
-            <div style={{ fontSize: 11, color: "#787b82", padding: "0 4px" }}>ⓘ 신호등(SIG)은 별도 배치 없이도 세션 전체에 상시 가동됩니다. 플로우는 실시간으로 저장·공유됩니다.</div>
-          </div>
-        )}
 
         {/* ==================== QUIZ ==================== */}
         {tab === "quiz" && (
