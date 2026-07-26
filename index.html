@@ -4127,7 +4127,19 @@ function App() {
                   <Label>📊 즉석 투표</Label>
                   {!poll && !pollDraft && <Btn sm onClick={() => setPollDraft({ q: "", options: ["", "", "", ""] })}>+ 투표 만들기</Btn>}
                 </div>
-                {poll ? (
+                {pollDraft ? (
+                  <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <input value={pollDraft.q} onChange={e => setPollDraft(s => ({ ...s, q: e.target.value }))} placeholder="투표 질문 (예: 사전학습 난이도는 어땠나요?)" className="inp" />
+                    {pollDraft.options.map((o, i) => (
+                      <input key={i} value={o} onChange={e => setPollDraft(s => ({ ...s, options: s.options.map((x, j) => j === i ? e.target.value : x) }))} placeholder={"보기 " + (i + 1) + (i >= 2 ? " (선택)" : "")} className="inp" />
+                    ))}
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      <Btn pri sm onClick={startPoll}>투표 시작</Btn>
+                      <Btn sm onClick={() => setPollDraft(s => ({ ...s, options: [...POLL_SCALE] }))}>난이도 4단계 채우기</Btn>
+                      <Btn sm onClick={() => setPollDraft(null)}>취소</Btn>
+                    </div>
+                  </div>
+                ) : poll ? (
                   <div>
                     <div style={{ fontSize: 13.5, fontWeight: 900, marginBottom: 8 }}>{poll.q} <span style={{ fontSize: 11, color: poll.status === "open" ? "#0E6B5B" : "#787b82", fontWeight: 700 }}>{poll.status === "open" ? "· 진행 중" : "· 마감됨"}</span></div>
                     {(poll.options || []).map((o, i) => {
@@ -4144,18 +4156,6 @@ function App() {
                     <div style={{ display: "flex", gap: 6 }}>
                       {poll.status === "open" ? <Btn pri sm onClick={closePoll}>마감 · 결과 공개</Btn> : <Btn sm onClick={() => setPollDraft({ q: poll.q, options: [...poll.options] })}>같은 질문으로 재투표</Btn>}
                       <Btn sm onClick={deletePoll} style={{ color: "#b3402a" }}>삭제</Btn>
-                    </div>
-                  </div>
-                ) : pollDraft ? (
-                  <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <input value={pollDraft.q} onChange={e => setPollDraft(s => ({ ...s, q: e.target.value }))} placeholder="투표 질문 (예: 사전학습 난이도는 어땠나요?)" className="inp" />
-                    {pollDraft.options.map((o, i) => (
-                      <input key={i} value={o} onChange={e => setPollDraft(s => ({ ...s, options: s.options.map((x, j) => j === i ? e.target.value : x) }))} placeholder={"보기 " + (i + 1) + (i >= 2 ? " (선택)" : "")} className="inp" />
-                    ))}
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                      <Btn pri sm onClick={startPoll}>투표 시작</Btn>
-                      <Btn sm onClick={() => setPollDraft(s => ({ ...s, options: [...POLL_SCALE] }))}>난이도 4단계 채우기</Btn>
-                      <Btn sm onClick={() => setPollDraft(null)}>취소</Btn>
                     </div>
                   </div>
                 ) : (
