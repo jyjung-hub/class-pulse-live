@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.10.0";
+const APP_VERSION = "LIVE 2.11.0";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2437,6 +2437,7 @@ function App() {
   const [signals, setSignals] = useState({});
   const [questionsQ, setQuestionsQ] = useState({});
   const [sgq, setSgq] = useState({}); // 학생 출제(SGQ) 제출함
+  const [weekMeta, setWeekMeta] = useState({}); // 주차 설계: 학습목표·평가방법·AI추천
   const [exitR, setExitR] = useState({});
   const [conf, setConf] = useState({ joinCode: "4A79K2", pin: "1234" });
   const [flows, setFlows] = useState({});
@@ -2474,7 +2475,7 @@ function App() {
     // 주차 전환 시 로컬 상태 초기화 후 해당 주차 구독
     setQuiz({ status: "idle", qIndex: 0, qEndsAt: 0, timeLimit: 20, questions: SEED_QUESTIONS });
     setPlayers({}); setAnswers({}); setSignals({}); setQuestionsQ({}); setExitR({}); setSession(null); setPoll(null); setQuizHist({});
-    setFlows({}); setActiveFlowIdW(null); setSigLog({}); setFlowRuns({}); setMyReport(null); setSgq({});
+    setFlows({}); setActiveFlowIdW(null); setSigLog({}); setFlowRuns({}); setMyReport(null); setSgq({}); setWeekMeta({});
     const subs = [
       [RW("quiz"), s => { const v = s.val(); if (v) setQuiz(q => ({ ...q, ...v, questions: v.questions || SEED_QUESTIONS })); }],
       [RW("players"), s => setPlayers(s.val() || {})],
@@ -2490,6 +2491,7 @@ function App() {
       [RW("flows"), s => setFlows(s.val() || {})],
       [RW("activeFlowId"), s => setActiveFlowIdW(s.val())],
       [RW("sgq"), s => setSgq(s.val() || {})],
+      [RW("meta"), s => setWeekMeta(s.val() || {})],
     ];
     subs.forEach(([ref, cb]) => ref.on("value", cb));
     return () => subs.forEach(([ref, cb]) => ref.off("value", cb));
@@ -2525,6 +2527,7 @@ function App() {
   const [liveEditBlock, setLiveEditBlock] = useState(null); // 수업 진행 중 · 현재 플로우의 단계 내용 수정
   const [pollDraft, setPollDraft] = useState(null); // 투표 만들기 폼
   const [sgqDraft, setSgqDraft] = useState(null); // 학생 출제 — 문항 제출 폼
+  const [metaDraft, setMetaDraft] = useState(null); // 이번 주 설계(학습목표·평가방법) 편집 폼
   const [anaTab, setAnaTab] = useState("week"); // 분석 섹션
   const [flowEditOpen, setFlowEditOpen] = useState(false); // 플로우 상세편집 펼침 여부 (기본 접힘)
   const [saDraft, setSaDraft] = useState(""); // 단답·서술 입력
@@ -2557,7 +2560,10 @@ function App() {
     const ppl = new Set();
     Object.values(hist).forEach(h => Object.keys(h.players || {}).forEach(p => ppl.add(p)));
     Object.keys(d.exit || {}).forEach(p => ppl.add(p));
+    const activeFl = (d.activeFlowId && fl[d.activeFlowId]) ? fl[d.activeFlowId] : (Object.values(fl)[0] || null);
     return { flowN, hasQuizBlock, quizN, gradedN, pollY, sigN, exitN, people: ppl.size,
+      flowName: activeFl ? activeFl.name : null, flowMethod: activeFl ? activeFl.method : null, flowSteps: activeFl ? (activeFl.blocks || []).length : 0,
+      objectives: (d.meta && d.meta.objectives) || "", evalMethod: (d.meta && d.meta.evalMethod) || "",
       empty: !flowN && !quizN && !pollY && !sigN && !exitN };
   };
   const semKpi = (() => {
@@ -2717,7 +2723,14 @@ function App() {
   /* ---------- 신호등·질문 ---------- */
   const setSignal = v => {
     RW("signals/" + me.id).set({ v, ts: serverNow(), nick: me.nick });
-    RW("sigLog/" + uid()).set({ v, ts: serverNow() }); // 타임라인 분석용 이력
+    // 타임라인 + 학습자별 분석용 이력: 누가, 어느 단계(활동)에서, 어떤 신호로 바꿨는지 모두 기록
+    RW("sigLog/" + uid()).set({
+      v, ts: serverNow(), studentId: me.id, nick: me.nick,
+      flowId: session ? session.flowId || null : null,
+      step: session ? session.step : null,
+      stepTitle: runBlock ? runBlock.title : null,
+      stepType: runBlock ? runBlock.type : null,
+    });
   };
   const mySignal = signals?.[me.id]?.v;
   const sigCounts = (() => {
@@ -2794,6 +2807,31 @@ function App() {
   };
   const setBlocks = b => RW("flows/" + activeFlow.id + "/blocks").set(b);
   const actsList = Object.entries(customActs || {}).map(([id, x]) => ({ id, ...x })).sort((p, q) => (p.createdAt || 0) - (q.createdAt || 0));
+  const saveMeta = () => {
+    if (!metaDraft) return;
+    RW("meta/objectives").set(metaDraft.objectives.trim());
+    RW("meta/evalMethod").set(metaDraft.evalMethod.trim());
+    setMetaDraft(null); notify("이번 주 설계를 저장했습니다.");
+  };
+  const copyAiPrompt = () => {
+    const flowDesc = flowList.length ? activeFlow.blocks.map((b, i) => (i + 1) + ". " + (ACT_TYPES[b.type] || b.type) + " - " + b.title + " (" + b.dur + ")").join("\n") : "(플로우 미설계)";
+    const over = confGap.filter(x => x.kind === "over").length, under = confGap.filter(x => x.kind === "under").length, ok = confGap.filter(x => x.kind === "ok").length;
+    const prompt = [
+      "당신은 대학 교수설계(교육공학) 전문가입니다. 아래 " + weekLabel(W) + "차 수업 데이터를 바탕으로 (1) 학습동기·몰입 향상 전략과 (2) AI/EdTech 활용 전략을 각각 구체적으로 제안해 주세요. 일반론 말고, 이 수업의 실제 설계·데이터에 근거해서 제안해 주세요.",
+      "",
+      "[학습목표] " + (weekMeta.objectives || "(미입력)"),
+      "[평가방법] " + (weekMeta.evalMethod || "(미입력)"),
+      "[플로우 구성]",
+      flowDesc,
+      "",
+      "[실제 참여 데이터]",
+      "- 참여 인원: " + coverage.total + "명 (퀴즈 응시 " + coverage.quiz + "명, 신호 참여 " + coverage.sig + "명, Exit 제출 " + coverage.exit + "명)",
+      "- 실시간 이해도 신호 분포: 🟢 이해됨 " + sigCounts.g + "% · 🟡 애매함 " + sigCounts.y + "% · 🔴 모르겠음 " + sigCounts.r + "% (응답 " + sigCounts.total + "명 기준)",
+      confGap.length ? "- 자신감×성취 괴리: 과신(자신감 높은데 정답률 낮음) " + over + "명, 과소평가(자신감 낮은데 정답률 높음) " + under + "명, 일치 " + ok + "명" : "- 자신감×성취 괴리 데이터 없음 (Exit·퀴즈 응답 부족)",
+    ].join("\n");
+    copyText(prompt);
+  };
+
   const saveNewAct = () => {
     const x = newAct;
     if (!x.name.trim()) return notify("활동 이름을 입력해 주세요.");
@@ -3813,7 +3851,7 @@ function App() {
                   <thead>
                     <tr style={{ color: "#787b82", fontSize: 10.5 }}>
                       <td style={{ width: 96, padding: "5px 8px" }}>주차</td>
-                      <td style={{ textAlign: "center" }}>🧩 플로우</td>
+                      <td style={{ textAlign: "left", minWidth: 120 }}>🧩 플로우</td>
                       <td style={{ textAlign: "center" }}>▶ 퀴즈</td>
                       <td style={{ textAlign: "center" }}>📊 투표</td>
                       <td style={{ textAlign: "center" }}>🚦 신호</td>
@@ -3838,7 +3876,11 @@ function App() {
                       return (
                         <tr key={w} onClick={() => R("config/week").set(w)} style={{ borderTop: "1px solid #eceade", cursor: "pointer", background: cur ? "#E7F3EE" : undefined }}>
                           <td style={{ padding: "7px 8px", fontWeight: cur ? 900 : 400, color: exam ? "#b3402a" : cur ? "#0F6E56" : "#55585f" }}>{cur ? "▶ " : ""}{w}주{exam ? (w === 8 ? " 중간" : " 기말") : ""}</td>
-                          <td style={{ textAlign: "center" }}><Dot st={cell(s.flowN > 0, false)} /></td>
+                          <td style={{ padding: "4px 4px", fontSize: 11 }}>
+                            {s.flowName
+                              ? <span title={s.flowMethod || ""}><span style={{ background: "#faf9f4", border: "1px solid #d8d6cc", borderRadius: 20, padding: "1px 8px", color: "#55585f", fontWeight: 700, fontSize: 10.5 }}>{s.flowMethod || "-"}</span> {s.flowName} <span style={{ color: "#a9aca7" }}>· {s.flowSteps}단계</span></span>
+                              : <Dot st={base} />}
+                          </td>
                           <td style={{ textAlign: "center" }}><Dot st={cell(s.quizN > 0, s.hasQuizBlock)} /></td>
                           <td style={{ textAlign: "center" }}><Dot st={cell(s.pollY, false)} /></td>
                           <td style={{ textAlign: "center" }}><Dot st={cell(s.sigN > 0, false)} /></td>
@@ -3868,6 +3910,32 @@ function App() {
                 </div>
               </div>
             </div>
+
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                <Label>{weekLabel(W)} 설계 — 학습목표·평가방법</Label>
+                {!metaDraft && <Btn sm onClick={() => setMetaDraft({ objectives: weekMeta.objectives || "", evalMethod: weekMeta.evalMethod || "" })}>✏️ 편집</Btn>}
+              </div>
+              {metaDraft ? (
+                <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <textarea rows={2} value={metaDraft.objectives} onChange={e => setMetaDraft(s => ({ ...s, objectives: e.target.value }))} placeholder="학습목표 (예: ADDIE 모형의 각 단계를 설명하고 사례에 적용할 수 있다)" className="inp" style={{ resize: "vertical" }} />
+                  <input value={metaDraft.evalMethod} onChange={e => setMetaDraft(s => ({ ...s, evalMethod: e.target.value }))} placeholder="평가방법 (예: 자기속도 퀴즈 10문항, 성적 20% 반영)" className="inp" />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <Btn pri sm onClick={saveMeta}>저장</Btn>
+                    <Btn sm onClick={() => setMetaDraft(null)}>취소</Btn>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 12.5, color: "#55585f", lineHeight: 1.7 }}>
+                  <div><b style={{ color: "#787b82", fontSize: 10.5 }}>학습목표</b> {weekMeta.objectives || <span style={{ color: "#a9aca7" }}>미입력</span>}</div>
+                  <div><b style={{ color: "#787b82", fontSize: 10.5 }}>평가방법</b> {weekMeta.evalMethod || <span style={{ color: "#a9aca7" }}>미입력</span>}</div>
+                </div>
+              )}
+              <div style={{ borderTop: "1px dashed #d8d6cc", marginTop: 10, paddingTop: 10 }}>
+                <div style={{ fontSize: 11.5, color: "#787b82", marginBottom: 6 }}>🤖 이번 주 학습목표·플로우·실제 참여 데이터를 근거로, 학습동기·몰입 전략과 AI/EdTech 활용 전략을 Claude에게 물어볼 프롬프트를 만들어 드립니다.</div>
+                <Btn sm onClick={copyAiPrompt}>🤖 AI 추천 프롬프트 복사</Btn>
+              </div>
+            </Card>
 
             <Card>
               <Label>설정</Label>
