@@ -2889,6 +2889,18 @@ function App() {
     });
     return { ...r, steps };
   })();
+  // 현재 진행 중인 플로우 세션 (실시간 반영 — 아직 종료되지 않은 단계는 '지금'까지의 경과 시간으로 계산)
+  const activeRun = (runFlow && session && session.stepLog) ? (() => {
+    const raw = runFlow.blocks.map((b, i) => ({ title: b.title, type: b.type, dur: b.dur, enteredAt: (session.stepLog || {})[i] || 0 }));
+    const steps = raw.map((s, i, arr) => {
+      const next = i + 1 < arr.length && arr[i + 1].enteredAt ? arr[i + 1].enteredAt : (s.enteredAt ? serverNow() : null);
+      const actual = s.enteredAt && next ? Math.max(0, Math.round((next - s.enteredAt) / 60000)) : null;
+      const plan = parseInt(s.dur) || null;
+      return { ...s, actual, plan, diff: actual !== null && plan !== null ? actual - plan : null };
+    });
+    return { name: runFlow.name, method: runFlow.method || "-", steps, live: true };
+  })() : null;
+  const displayRun = activeRun || lastRun;
   // 신호등 타임라인 (10분 버킷)
   const sigTimeline = (() => {
     const logs = Object.values(sigLog || {}).sort((x, y) => x.ts - y.ts);
@@ -4307,9 +4319,9 @@ function App() {
                 {coverage.total === 0 && <div style={{ fontSize: 12, color: "#a9aca7" }}>이번 주 참여 데이터가 아직 없습니다.</div>}
               </Card>
 
-              {lastRun && (
+              {displayRun && (
                 <Card>
-                  <Label>플로우 계획 대비 실행 · {lastRun.name}</Label>
+                  <Label>플로우 계획 대비 실행 · {displayRun.name}{displayRun.live && <span style={{ color: "#0E6B5B", marginLeft: 6 }}>● 진행 중 (실시간)</span>}</Label>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <thead><tr style={{ color: "#787b82", fontSize: 10.5, textAlign: "left" }}>
                       <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B" }}>단계</th>
@@ -4318,9 +4330,9 @@ function App() {
                       <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>차이</th>
                     </tr></thead>
                     <tbody>
-                      {lastRun.steps.map((s, k) => (
-                        <tr key={k}>
-                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade" }}>{k + 1}. {s.title}</td>
+                      {displayRun.steps.map((s, k) => (
+                        <tr key={k} style={displayRun.live && session.step === k ? { background: "#EAF5F1" } : undefined}>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade" }}>{k + 1}. {s.title}{displayRun.live && session.step === k ? " ▶" : ""}</td>
                           <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{s.plan !== null ? s.plan + "분" : s.dur}</td>
                           <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{s.actual !== null ? s.actual + "분" : "—"}</td>
                           <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: s.diff === null ? "#a9aca7" : s.diff > 5 ? "#b3402a" : s.diff < -5 ? "#BA7517" : "#0F6E56" }}>{s.diff === null ? "—" : (s.diff > 0 ? "+" : "") + s.diff + "분"}</td>
@@ -4328,7 +4340,7 @@ function App() {
                       ))}
                     </tbody>
                   </table>
-                  <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6 }}>ⓘ 플로우를 [수업 종료]까지 진행하면 기록됩니다. 빨강=계획 초과, 주황=계획 미달.</div>
+                  <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6 }}>{displayRun.live ? "ⓘ 진행 중인 단계는 지금 이 순간까지의 경과 시간으로 계산되어 계속 갱신됩니다." : "ⓘ 플로우를 [수업 종료]까지 진행하면 기록됩니다."} 빨강=계획 초과, 주황=계획 미달.</div>
                 </Card>
               )}
 
