@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9.12";
+const APP_VERSION = "LIVE 2.9.13";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -3415,7 +3415,7 @@ function App() {
   // 교수자가 (재)접속했을 때 착지할 탭 — 수업이 진행 중이면 학기 대시보드 대신 현재 활동 화면으로
   const landingTab = () => {
     if (!runFlow || !runBlock) return "home";
-    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "analytics";
+    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "signal";
   };
   const gotoLanding = () => {
     if (runFlow) setActiveFlow(runFlow.id); // 플로우 상세는 항상 전역에 표시되므로 진행 중인 플로우로 선택 동기화
