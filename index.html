@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.11.1";
+const APP_VERSION = "LIVE 2.12.0";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2344,6 +2344,7 @@ const SEED_QUESTIONS = [
 
 const ACT_TYPES = {BRD:"협업 보드",QZG:"게임 퀴즈",QZS:"자기속도 퀴즈",POL:"즉석 투표",EXT:"Exit Ticket",SIG:"신호등",SGQ:"학생 출제",CUS:"사용자 활동"};
 const LINKABLE = ["CUS", "BRD", "SGQ"]; // 외부 도구 링크·안내문 지원 활동
+const TIMELINE_COLORS = ["#0E6B5B", "#3E8E7E", "#7FB9AA", "#BA7517", "#C99A4A", "#5B7A99", "#8AA6BF", "#9B6B9E"];
 const QTYPES = { MC: "선다형", TF: "진위형", SA: "단답형", ES: "서술형" };
 const normSA = s => String(s || "").trim().toLowerCase().replace(/\s+/g, "");
 const isCorrect = (q, a) => {
@@ -2521,6 +2522,7 @@ function App() {
   const [codeDraft, setCodeDraft] = useState("");
   const [qDraft, setQDraft] = useState("");
   const [exitForm, setExitForm] = useState({ scale: 0, concept: "", open: "" });
+  const [exitEditing, setExitEditing] = useState(false); // Exit Ticket 재제출(수정) 모드
   const [newQ, setNewQ] = useState(null); // 문항 직접 추가 폼
   const [newAct, setNewAct] = useState(null); // 사용자 정의 활동 만들기 폼
   const [editBlock, setEditBlock] = useState(null); // 플로우 블록 편집
@@ -2738,6 +2740,13 @@ function App() {
     const t = fresh.length || 1; const c = { g:0, y:0, r:0 };
     fresh.forEach(s => c[s.v]++);
     return { g: Math.round(c.g/t*100), y: Math.round(c.y/t*100), r: Math.round(c.r/t*100), total: fresh.length };
+  })();
+  const sigAdvice = (() => {
+    if (!sigCounts.total) return null;
+    if (sigCounts.r >= 30) return { bg: "#FBEAE5", color: "#7c2d1c", icon: "🔴", title: "'모르겠음'이 많습니다", text: "핵심 개념을 다시 짚어주거나, 학생에게 직접 질문해서 어디서 막혔는지 확인해보세요." };
+    if (sigCounts.y >= 40) return { bg: "#FBF3DE", color: "#7a5710", icon: "🟡", title: "'애매함'이 우세합니다", text: "짧은 예시나 비유를 추가하거나, 방금 배운 내용을 한 문장으로 말해보게 해보세요." };
+    if (sigCounts.g >= 70) return { bg: "#E7F3EE", color: "#0F6E56", icon: "🟢", title: "이해도가 높습니다", text: "다음 활동으로 진행해도 좋습니다. 속도를 조금 올려도 괜찮아 보여요." };
+    return { bg: "#faf9f4", color: "#55585f", icon: "🔵", title: "신호가 고르게 분포되어 있습니다", text: "조금 더 지켜보면서, 이해도가 낮은 학생 위주로 개별 확인을 해보셔도 좋습니다." };
   })();
   const postQuestion = () => {
     if (!qDraft.trim()) return;
@@ -2983,6 +2992,24 @@ function App() {
       return { ...s, actual, plan, diff: actual !== null && plan !== null ? actual - plan : null };
     });
     return { ...r, steps };
+  })();
+  // 활동 타임라인: 전체를 100%로 보고 각 단계의 실제 소요시간·구간 내 학습자 상호작용(신호 참여·색 분포)을 계산
+  const flowTimeline = (() => {
+    if (!lastRun) return null;
+    const steps = lastRun.steps;
+    const totalActual = steps.reduce((sum, s) => sum + (s.actual || 0), 0);
+    if (!totalActual) return null;
+    const segs = steps.map((s, i) => {
+      const startTs = s.enteredAt || 0;
+      const endTs = (i + 1 < steps.length ? steps[i + 1].enteredAt : lastRun.endedAt) || 0;
+      const sigIn = Object.values(sigLog || {}).filter(x => startTs && endTs && x.ts >= startTs && x.ts < endTs);
+      const uniq = new Set(sigIn.map(x => x.studentId || x.nick)).size;
+      const g = sigIn.filter(x => x.v === "g").length, y = sigIn.filter(x => x.v === "y").length, r = sigIn.filter(x => x.v === "r").length;
+      const sigTotal = g + y + r;
+      return { title: s.title, type: s.type, actual: s.actual || 0, pct: Math.round((s.actual || 0) / totalActual * 100), participants: uniq,
+        mix: sigTotal ? { g: Math.round(g / sigTotal * 100), y: Math.round(y / sigTotal * 100), r: Math.round(r / sigTotal * 100) } : null };
+    });
+    return { totalActual, segs };
   })();
   // 현재 진행 중인 플로우 세션 (실시간 반영 — 아직 종료되지 않은 단계는 '지금'까지의 경과 시간으로 계산)
   const activeRun = (runFlow && session && session.stepLog) ? (() => {
@@ -4482,15 +4509,16 @@ function App() {
         {tab === "exit" && (
           <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {!isInstructor ? (
-              myExit ? (
+              (myExit && !exitEditing) ? (
                 <Card style={{ textAlign: "center" }}>
                   <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
                   <div style={{ fontWeight: 900, fontSize: 14 }}>제출 완료</div>
                   <div style={{ fontSize: 12.5, color: "#787b82", marginTop: 4 }}>이해도 {myExit.scale}/5 · 응답은 익명으로 집계됩니다.</div>
+                  <Btn sm style={{ marginTop: 10 }} onClick={() => { setExitForm({ scale: myExit.scale || 0, concept: myExit.concept || "", open: myExit.open || "" }); setExitEditing(true); }}>✏️ 다시 제출(수정)</Btn>
                 </Card>
               ) : (
                 <Card>
-                  <Label>Exit Ticket · 성적 미반영</Label>
+                  <Label>Exit Ticket · 성적 미반영{myExit && " · 수정 중"}</Label>
                   <div style={{ fontSize: 13.5, fontWeight: 900, margin: "6px 0 8px" }}>1. 오늘 수업 이해도는?</div>
                   <div style={{ display: "flex", gap: 6, justifyContent: "space-between", marginBottom: 16 }}>
                     {[1,2,3,4,5].map(n => (
@@ -4502,7 +4530,10 @@ function App() {
                   <input value={exitForm.concept} onChange={e => setExitForm(f => ({ ...f, concept: e.target.value }))} placeholder="예: 형성평가" className="inp" style={{ width: "100%", marginBottom: 16, boxSizing: "border-box" }} />
                   <div style={{ fontSize: 13.5, fontWeight: 900, marginBottom: 6 }}>3. 아직 궁금하거나 헷갈리는 점은?</div>
                   <textarea rows={3} value={exitForm.open} onChange={e => setExitForm(f => ({ ...f, open: e.target.value }))} placeholder="자유롭게 적어주세요…" className="inp" style={{ width: "100%", resize: "vertical", boxSizing: "border-box" }} />
-                  <Btn pri style={{ width: "100%", marginTop: 12 }} onClick={submitExit}>제출</Btn>
+                  <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+                    <Btn pri style={{ flex: 1 }} onClick={() => { submitExit(); setExitEditing(false); }}>제출</Btn>
+                    {myExit && <Btn onClick={() => setExitEditing(false)}>취소</Btn>}
+                  </div>
                 </Card>
               )
             ) : (<React.Fragment>
@@ -4587,6 +4618,34 @@ function App() {
                 </Card>
               )}
 
+              {flowTimeline && (
+                <Card>
+                  <Label>활동 타임라인 — 시간·상호작용 (전체 실제 소요시간 = 100%)</Label>
+                  <div style={{ display: "flex", height: 34, borderRadius: 8, overflow: "hidden", border: "1.5px solid #24272B" }}>
+                    {flowTimeline.segs.map((sg, i) => (
+                      <div key={i} title={sg.title + " · " + sg.actual + "분 · 참여 " + sg.participants + "명"}
+                        style={{ width: sg.pct + "%", minWidth: sg.pct ? 4 : 0, background: TIMELINE_COLORS[i % TIMELINE_COLORS.length], borderRight: "1px solid rgba(255,255,255,.6)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                        {sg.pct >= 8 && <span style={{ fontSize: 10.5, fontWeight: 900, color: "#fff", whiteSpace: "nowrap" }}>{sg.pct}%</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+                    {flowTimeline.segs.map((sg, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                        <span style={{ width: 12, height: 12, borderRadius: 3, background: TIMELINE_COLORS[i % TIMELINE_COLORS.length], flexShrink: 0 }} />
+                        <span style={{ flex: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {sg.title}</span>
+                        <span style={{ fontFamily: "monospace", color: "#787b82", minWidth: 70, textAlign: "right" }}>{sg.actual}분 ({sg.pct}%)</span>
+                        <span style={{ color: "#787b82", minWidth: 60, textAlign: "right" }}>참여 {sg.participants}명</span>
+                        <span style={{ minWidth: 90, textAlign: "right", fontSize: 10.5 }}>
+                          {sg.mix ? <React.Fragment>🟢{sg.mix.g}% 🟡{sg.mix.y}% 🔴{sg.mix.r}%</React.Fragment> : <span style={{ color: "#a9aca7" }}>신호 없음</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 8 }}>ⓘ '참여'는 해당 단계 시간 동안 이해도 신호를 낸 학생 수, 색 비율은 그 구간 신호 분포입니다. 특정 단계에서 참여가 적거나 🔴 비율이 높다면 다음 운영 시 시간 배분·활동 방식을 조정해보세요.</div>
+                </Card>
+              )}
+
               <Card>
                 <Label>신호등 타임라인 (수업 중 이해도 변화)</Label>
                 {sigTimeline ? (
@@ -4659,19 +4718,26 @@ function App() {
 
               <Card>
                 <Label>문항별 정답률 (이번 주 완주 퀴즈)</Label>
-                {histList0.map(h => (h.questions || []).map((q, qi) => {
-                  const m = (h.answers || {})[qi] || {}; const n = Object.keys(m).length;
-                  const c = Object.values(m).filter(x => isCorrect(q, x)).length;
-                  const p = n ? Math.round(c / n * 100) : 0;
-                  return (
-                    <div key={h.id + qi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12 }}>
-                      <span style={{ minWidth: 30, fontWeight: 900 }}>Q{qi + 1}</span>
-                      <span style={{ minWidth: 90, fontSize: 10.5, color: "#787b82", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.setName}</span>
-                      <div style={{ flex: 1, height: 13, background: "#e7e5dc", borderRadius: 4, overflow: "hidden" }}><div style={{ width: p + "%", height: "100%", background: p < 50 ? "#E24B4A" : "#0E6B5B" }} /></div>
-                      <span style={{ fontFamily: "monospace", minWidth: 62, textAlign: "right" }}>{p}% ({n}명)</span>
+                {histList0.map((h, hi) => (
+                  <div key={h.id} style={{ marginBottom: hi < histList0.length - 1 ? 12 : 0, border: "1px solid #eceade", borderRadius: 9, padding: "8px 10px" }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 900, color: "#0F6E56", marginBottom: 4 }}>
+                      {hi + 1}회차 · {h.setName || "문항 세트"} {h.graded && <span style={{ color: "#b3402a" }}>· 성적반영</span>} <span style={{ color: "#a9aca7", fontWeight: 400 }}>· {h.endedAt ? new Date(h.endedAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</span>
                     </div>
-                  );
-                }))}
+                    {(h.questions || []).map((q, qi) => {
+                      const m = (h.answers || {})[qi] || {}; const n = Object.keys(m).length;
+                      const c = Object.values(m).filter(x => isCorrect(q, x)).length;
+                      const p = n ? Math.round(c / n * 100) : 0;
+                      return (
+                        <div key={qi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12 }}>
+                          <span style={{ minWidth: 30, fontWeight: 900 }}>Q{qi + 1}</span>
+                          <span style={{ flex: 1.4, fontSize: 11, color: "#55585f", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={q.q}>{q.q}</span>
+                          <div style={{ flex: 1, height: 13, background: "#e7e5dc", borderRadius: 4, overflow: "hidden" }}><div style={{ width: p + "%", height: "100%", background: p < 50 ? "#E24B4A" : "#0E6B5B" }} /></div>
+                          <span style={{ fontFamily: "monospace", minWidth: 62, textAlign: "right" }}>{p}% ({n}명)</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
                 {histList0.length === 0 && <div style={{ fontSize: 12, color: "#a9aca7" }}>완주한 퀴즈가 아직 없습니다.</div>}
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <Btn sm onClick={exportWeekExcel}>📥 {W}주차 활동 리포트 Excel</Btn>
@@ -4803,7 +4869,7 @@ function App() {
               <div style={{ width: sigCounts.r + "%", background: "#F3C1B4", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.r ? 40 : 0 }}>{sigCounts.r > 0 && "🔴" + sigCounts.r + "%"}</div>
               {sigCounts.total === 0 && <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#a9aca7", fontWeight: 400 }}>아직 신호 없음</div>}
             </div>
-            {sigCounts.r >= 30 && <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 900, color: "#b3402a" }}>⚠ '모르겠음' 30% 초과 — 추가 설명을 권장합니다</div>}
+            {sigAdvice && <div style={{ marginTop: 8, background: sigAdvice.bg, color: sigAdvice.color, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }}><b>{sigAdvice.icon} {sigAdvice.title}</b> — {sigAdvice.text}</div>}
           </Card>
         )}
         <Card style={{ marginTop: 12 }}>
