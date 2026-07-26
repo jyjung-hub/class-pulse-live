@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.12.0";
+const APP_VERSION = "LIVE 2.13.0";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2531,7 +2531,6 @@ function App() {
   const [sgqDraft, setSgqDraft] = useState(null); // 학생 출제 — 문항 제출 폼
   const [metaDraft, setMetaDraft] = useState(null); // 이번 주 설계(학습목표·평가방법) 편집 폼
   const [anaTab, setAnaTab] = useState("week"); // 분석 섹션
-  const [flowEditOpen, setFlowEditOpen] = useState(false); // 플로우 상세편집 펼침 여부 (기본 접힘)
   const [saDraft, setSaDraft] = useState(""); // 단답·서술 입력
   const [myReport, setMyReport] = useState(null); // 학생 내 리포트
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
@@ -3501,10 +3500,10 @@ function App() {
   // 교수자가 (재)접속했을 때 착지할 탭 — 수업이 진행 중이면 학기 대시보드 대신 현재 활동 화면으로
   const landingTab = () => {
     if (!runFlow || !runBlock) return "home";
-    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "signal";
+    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "flow";
   };
   const gotoLanding = () => {
-    if (runFlow) setActiveFlow(runFlow.id); // 플로우 상세는 항상 전역에 표시되므로 진행 중인 플로우로 선택 동기화
+    if (runFlow) setActiveFlow(runFlow.id); // 플로우 탭으로 이동할 때 진행 중인 플로우가 자동 선택되도록 동기화
     setTab(landingTab());
   };
   const verifyPin = () => {
@@ -3537,7 +3536,7 @@ function App() {
   })();
 
   const TABS = isInstructor
-    ? [["home","홈","🏠"],["quiz","퀴즈","▶"],["signal","신호등","🚦"],["exit","Exit","⏻"],["analytics","분석","📊"]]
+    ? [["home","홈","🏠"],["flow","플로우","🧩"],["quiz","퀴즈","▶"],["signal","신호등","🚦"],["exit","Exit","⏻"],["analytics","분석","📊"]]
     : [["home","홈","🏠"],["quiz","퀴즈","▶"],["signal","신호등","🚦"],["exit","Exit","⏻"]];
 
   /* ============================ RENDER ============================ */
@@ -3590,8 +3589,8 @@ function App() {
           </Card>
         )}
 
-        {/* ==================== 플로우 선택 (교수자 · 모든 화면) ==================== */}
-        {isInstructor && (
+        {/* ==================== 플로우 선택 (교수자 · 플로우 탭 전용) ==================== */}
+        {tab === "flow" && isInstructor && (
           <Card style={{ marginBottom: 12 }}>
             <Label>{weekLabel(W)}차 플로우 ({flowList.length}) — 이 주차 전용으로 관리됩니다</Label>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -3735,25 +3734,18 @@ function App() {
           </Card>
         )}
 
-        {/* ==================== 플로우 상세 편집 (교수자 · 모든 화면) ==================== */}
-        {isInstructor && flowList.length > 0 && (
+        {/* ==================== 플로우 상세 편집 (교수자 · 플로우 탭 전용) ==================== */}
+        {tab === "flow" && isInstructor && flowList.length > 0 && (
           <Card style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: flowEditOpen ? 4 : 0 }}>
-              <button onClick={() => setFlowEditOpen(o => !o)} style={{ border: "none", background: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit" }}>
-                <span style={{ fontSize: 12, color: "#787b82" }}>{flowEditOpen ? "▾" : "▸"}</span>
-                <span style={{ fontWeight: 900, fontSize: 14 }}>✏️ {activeFlow.name} 상세편집</span>
-                {!flowEditOpen && <span style={{ fontSize: 11, color: "#a9aca7" }}>· {activeFlow.blocks.length}단계 · 필요할 때 펼쳐서 편집하세요</span>}
-              </button>
-              {flowEditOpen && (
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {!runFlow && <Btn pri sm onClick={startFlowSession}>▶ 이 플로우로 수업 시작</Btn>}
-                  <Btn sm onClick={renameFlow}>이름 변경</Btn>
-                  <Btn sm onClick={dupFlow}>복제</Btn>
-                  <Btn sm onClick={delFlow} style={{ color: "#b3402a" }}>삭제</Btn>
-                </div>
-              )}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+              <div style={{ fontWeight: 900, fontSize: 14 }}>✏️ {activeFlow.name}</div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {!runFlow && <Btn pri sm onClick={startFlowSession}>▶ 이 플로우로 수업 시작</Btn>}
+                <Btn sm onClick={renameFlow}>이름 변경</Btn>
+                <Btn sm onClick={dupFlow}>복제</Btn>
+                <Btn sm onClick={delFlow} style={{ color: "#b3402a" }}>삭제</Btn>
+              </div>
             </div>
-            {flowEditOpen && (
             <React.Fragment>
             {FLOW_TEMPLATES[activeFlow.method] && <div style={{ fontSize: 11, color: "#787b82", marginBottom: 10 }}>ⓘ {activeFlow.method}: {FLOW_TEMPLATES[activeFlow.method].desc}</div>}
             {runFlow && runFlow.id === activeFlow.id ? (
@@ -3846,7 +3838,6 @@ function App() {
               <div style={{ fontSize: 11, color: "#787b82", marginTop: 8 }}>ⓘ 신호등(SIG)은 별도 배치 없이도 세션 전체에 상시 가동됩니다. 플로우는 실시간으로 저장·공유됩니다.</div>
             </div>
             </React.Fragment>
-            )}
           </Card>
         )}
 
@@ -3982,6 +3973,48 @@ function App() {
                 <Btn sm onClick={renameMe}>표시이름 설정</Btn>
               </div>
               <div style={{ fontSize: 12.5, color: "#55585f", lineHeight: 1.6 }}>지금은 <b>{weekLabel(W)}</b>차 수업입니다. 강의 중에는 <b>신호등</b>으로 이해도를 알려주시고, 퀴즈가 열리면 참여 코드로 입장하세요.</div>
+            </Card>
+            <Card>
+              <Label>📊 {weekLabel(W)} 나의 활동</Label>
+              {(() => {
+                const myAcc = weekAcc[me.id];
+                const mySigLog = Object.values(sigLog || {}).filter(x => x.studentId === me.id).sort((a, b) => a.ts - b.ts);
+                const myGap = confGap.find(x => x.pid === me.id);
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ background: "#faf9f4", borderRadius: 10, padding: "6px 12px", textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: "#787b82" }}>퀴즈 정답률</div>
+                        <div style={{ fontSize: 15, fontWeight: 900, color: "#0F6E56" }}>{myAcc && myAcc.ans ? Math.round(myAcc.cor / myAcc.ans * 100) + "%" : "—"}</div>
+                      </div>
+                      <div style={{ background: "#faf9f4", borderRadius: 10, padding: "6px 12px", textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: "#787b82" }}>신호 제출</div>
+                        <div style={{ fontSize: 15, fontWeight: 900, color: "#24272B" }}>{mySigLog.length}회</div>
+                      </div>
+                      <div style={{ background: "#faf9f4", borderRadius: 10, padding: "6px 12px", textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: "#787b82" }}>Exit 제출</div>
+                        <div style={{ fontSize: 15, fontWeight: 900, color: "#24272B" }}>{myExit ? "완료 ✓" : "—"}</div>
+                      </div>
+                    </div>
+                    {mySigLog.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 10.5, color: "#787b82", marginBottom: 4 }}>나의 이해도 변화 (시간순)</div>
+                        <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+                          {mySigLog.map((x, i) => <span key={i} title={x.stepTitle || ""} style={{ fontSize: 15 }}>{x.v === "g" ? "🟢" : x.v === "y" ? "🟡" : "🔴"}</span>)}
+                        </div>
+                      </div>
+                    )}
+                    {myGap && myGap.kind !== "ok" && (
+                      <div style={{ fontSize: 12, background: myGap.kind === "over" ? "#FBEAE5" : "#E7F3EE", color: myGap.kind === "over" ? "#7c2d1c" : "#0F6E56", borderRadius: 8, padding: "8px 10px" }}>
+                        {myGap.kind === "over"
+                          ? "자신감(Exit " + myGap.scale + "/5)에 비해 실제 정답률(" + myGap.acc + "%)이 낮아요 — 이번 주 개념을 한 번 더 확인해보세요."
+                          : "실제 정답률(" + myGap.acc + "%)에 비해 자신감(Exit " + myGap.scale + "/5)이 낮았어요 — 생각보다 잘하고 있어요!"}
+                      </div>
+                    )}
+                    {!myAcc && !mySigLog.length && !myExit && <div style={{ fontSize: 12, color: "#a9aca7" }}>이번 주 활동에 참여하면 여기에 나의 분석이 표시됩니다.</div>}
+                  </div>
+                );
+              })()}
             </Card>
             <Card>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -4502,6 +4535,46 @@ function App() {
                 <div style={{ fontSize: 10.5, color: "#787b82", textAlign: "center" }}>익명으로 집계됩니다 · 언제든 변경 가능</div>
               </Card>
             )}
+
+            {isInstructor && (
+              <Card>
+                <Label>🚦 실시간 이해도 (최근 30분 · {sigCounts.total}명)</Label>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, margin: "8px 0" }}>
+                  {[["g","🟢","이해됨","#BFE3CF","#0F6E56"],["y","🟡","애매함","#F6E7B2","#7a5710"],["r","🔴","모르겠음","#F3C1B4","#7c2d1c"]].map(([k, e, t, bg, fg]) => (
+                    <div key={k} style={{ border: "2px solid " + bg, background: bg, borderRadius: 12, padding: "14px 4px", textAlign: "center" }}>
+                      <div style={{ fontSize: 24, marginBottom: 2 }}>{e}</div>
+                      <div style={{ fontSize: 17, fontWeight: 900, color: fg }}>{sigCounts[k]}%</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: fg }}>{t}</div>
+                    </div>
+                  ))}
+                </div>
+                {sigCounts.total === 0 && <div style={{ textAlign: "center", color: "#a9aca7", fontSize: 12.5, marginBottom: 4 }}>아직 신호 없음</div>}
+                {sigAdvice && <div style={{ marginTop: 4, background: sigAdvice.bg, color: sigAdvice.color, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }}><b>{sigAdvice.icon} {sigAdvice.title}</b> — {sigAdvice.text}</div>}
+              </Card>
+            )}
+
+            <Card>
+              <Label>익명 질문함 (공감순)</Label>
+              {!isInstructor && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  <input value={qDraft} onChange={e => setQDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && postQuestion()}
+                    placeholder="✋ 익명으로 질문하기…" className="inp" style={{ flex: 1 }} />
+                  <Btn pri onClick={postQuestion}>등록</Btn>
+                </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {Object.entries(questionsQ || {}).map(([id, q]) => ({ id, ...q, voteN: Object.keys(q.votes||{}).length, voted: !!(q.votes||{})[me.id] }))
+                  .sort((a, b) => b.voteN - a.voteN)
+                  .map(q => (
+                    <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 8, border: "1.5px solid #d8d6cc", borderRadius: 9, padding: "8px 10px" }}>
+                      <span style={{ flex: 1, fontSize: 13 }}>{q.text}</span>
+                      <button onClick={() => voteQuestion(q.id, q.voted)} className={"cpb sm"}
+                        style={{ background: q.voted ? "#0E6B5B" : "#fff", color: q.voted ? "#fff" : "#24272B", borderColor: q.voted ? "#0E6B5B" : "#24272B" }}>▲ {q.voteN}</button>
+                    </div>
+                  ))}
+                {Object.keys(questionsQ || {}).length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "10px 0" }}>아직 질문이 없습니다.</div>}
+              </div>
+            </Card>
           </div>
         )}
 
@@ -4858,42 +4931,6 @@ function App() {
             </React.Fragment>)}
           </div>
         )}
-
-        {/* ==================== 하단 공통 (모든 화면 맨 아래) ==================== */}
-        {isInstructor && (
-          <Card style={{ marginTop: 12 }}>
-            <Label>실시간 이해도 (최근 30분 · {sigCounts.total}명)</Label>
-            <div style={{ display: "flex", height: 26, borderRadius: 8, overflow: "hidden", border: "1.5px solid #24272B", fontSize: 11.5, fontWeight: 900 }}>
-              <div style={{ width: sigCounts.g + "%", background: "#BFE3CF", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.g ? 40 : 0 }}>{sigCounts.g > 0 && "🟢" + sigCounts.g + "%"}</div>
-              <div style={{ width: sigCounts.y + "%", background: "#F6E7B2", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.y ? 40 : 0 }}>{sigCounts.y > 0 && "🟡" + sigCounts.y + "%"}</div>
-              <div style={{ width: sigCounts.r + "%", background: "#F3C1B4", display: "flex", alignItems: "center", justifyContent: "center", minWidth: sigCounts.r ? 40 : 0 }}>{sigCounts.r > 0 && "🔴" + sigCounts.r + "%"}</div>
-              {sigCounts.total === 0 && <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#a9aca7", fontWeight: 400 }}>아직 신호 없음</div>}
-            </div>
-            {sigAdvice && <div style={{ marginTop: 8, background: sigAdvice.bg, color: sigAdvice.color, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }}><b>{sigAdvice.icon} {sigAdvice.title}</b> — {sigAdvice.text}</div>}
-          </Card>
-        )}
-        <Card style={{ marginTop: 12 }}>
-          <Label>익명 질문함 (공감순)</Label>
-          {!isInstructor && (
-            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-              <input value={qDraft} onChange={e => setQDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && postQuestion()}
-                placeholder="✋ 익명으로 질문하기…" className="inp" style={{ flex: 1 }} />
-              <Btn pri onClick={postQuestion}>등록</Btn>
-            </div>
-          )}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {Object.entries(questionsQ || {}).map(([id, q]) => ({ id, ...q, voteN: Object.keys(q.votes||{}).length, voted: !!(q.votes||{})[me.id] }))
-              .sort((a, b) => b.voteN - a.voteN)
-              .map(q => (
-                <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 8, border: "1.5px solid #d8d6cc", borderRadius: 9, padding: "8px 10px" }}>
-                  <span style={{ flex: 1, fontSize: 13 }}>{q.text}</span>
-                  <button onClick={() => voteQuestion(q.id, q.voted)} className={"cpb sm"}
-                    style={{ background: q.voted ? "#0E6B5B" : "#fff", color: q.voted ? "#fff" : "#24272B", borderColor: q.voted ? "#0E6B5B" : "#24272B" }}>▲ {q.voteN}</button>
-                </div>
-              ))}
-            {Object.keys(questionsQ || {}).length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "10px 0" }}>아직 질문이 없습니다.</div>}
-          </div>
-        </Card>
       </main>
 
       {/* ---------- 하단 탭 ---------- */}
