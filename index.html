@@ -2821,6 +2821,10 @@ function App() {
     RW("session").set({ flowId: activeFlow.id, step: 0, startedAt: serverNow(), stepLog: { 0: serverNow() } });
     notify("'" + activeFlow.name + "' 플로우로 수업을 시작합니다.");
   };
+  const prevStep = () => {
+    if (!runFlow || session.step <= 0) return;
+    RW("session/step").set(session.step - 1);
+  };
   const nextStep = () => {
     if (!runFlow) return;
     if (session.step + 1 >= runFlow.blocks.length) return endFlowSession();
@@ -3440,6 +3444,7 @@ function App() {
                 {runBlock.type === "POL" && <Btn sm onClick={() => { setPollDraft({ q: (runBlock.poll && runBlock.poll.q) || runBlock.title, options: (runBlock.poll && runBlock.poll.choices) ? [...runBlock.poll.choices] : [...POLL_SCALE] }); setTab("signal"); }} style={{ borderColor: "#fff" }}>📊 이 단계 투표 열기</Btn>}
                 {LINKABLE.includes(runBlock.type) && runBlock.link && <a href={runBlock.link} target="_blank" rel="noopener noreferrer" className="cpb sm" style={{ borderColor: "#fff", background: "#fff", color: "#0E6B5B", textDecoration: "none" }}>🔗 자료 열기</a>}
                 {runBlock.type === "EXT" && <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>Exit 결과 보기</Btn>}
+                <Btn sm onClick={prevStep} disabled={session.step <= 0} style={{ borderColor: "#fff", opacity: session.step <= 0 ? .45 : 1 }}>← 이전 단계</Btn>
                 <Btn sm onClick={nextStep} style={{ borderColor: "#fff" }}>{session.step + 1 >= runFlow.blocks.length ? "수업 종료" : "다음 단계 →"}</Btn>
                 <Btn sm onClick={endFlowSession} style={{ borderColor: "#fff", marginLeft: "auto" }}>종료</Btn>
               </div>
