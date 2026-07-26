@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9.3";
+const APP_VERSION = "LIVE 2.9.7";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2535,8 +2535,8 @@ function App() {
   const askText = (title, desc, initial, placeholder, ok) => setDlg({ mode: "prompt", title, desc, value: initial || "", placeholder, ok });
   const askConfirm = (title, desc, ok) => setDlg({ mode: "confirm", title, desc, ok });
   const isInstructor = role === "instructor" && instructorOk;
-  // 학생 화면: 교수자가 단계를 이동(앞/뒤 모두)하면 이전 단계에 머물러 있던 탭(퀴즈·투표 등)을 정리하고 현재 단계 배너로 되돌림
-  useEffect(() => { if (!isInstructor) setTab("home"); }, [session?.flowId, session?.step]);
+  // 단계가 바뀌면(앞/뒤 모두) 학생은 홈으로, 교수자는 현재 활동에 맞는 탭으로 자동 전환
+  useEffect(() => { setTab(isInstructor ? landingTab() : "home"); }, [session?.flowId, session?.step]);
   const refreshSem = () => db.ref(ROOM + "/weeks").once("value").then(s => setSemData(s.val() || {})).catch(() => {});
   useEffect(() => { if (isInstructor && (tab === "home" || tab === "analytics")) refreshSem(); }, [isInstructor, tab, W]);
   const semWeek = w => {
@@ -3389,9 +3389,14 @@ function App() {
     if (!/^\d{4,6}$/.test(v.trim())) { notify("숫자 4~6자리로 입력해 주세요."); return false; }
     R("config/pin").set(v.trim()); notify("PIN이 변경되었습니다.");
   });
+  // 교수자가 (재)접속했을 때 착지할 탭 — 수업이 진행 중이면 학기 대시보드 대신 현재 활동 화면으로
+  const landingTab = () => {
+    if (!runFlow || !runBlock) return "home";
+    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "analytics";
+  };
   const verifyPin = () => {
     if (pinDraft.trim() !== (conf.pin || "1234")) { setPinDraft(""); return notify("PIN이 일치하지 않습니다."); }
-    setInstructorOk(true); setPinOpen(false); setRole("instructor"); setTab("home");
+    setInstructorOk(true); setPinOpen(false); setRole("instructor"); setTab(landingTab());
     notify("교수자 모드로 전환되었습니다.");
   };
   const resetAll = () => askConfirm("전체 초기화", "퀴즈·신호·질문·Exit 데이터를 모두 지울까요? (문항·코드·PIN 유지)", async () => {
@@ -3436,7 +3441,7 @@ function App() {
             {instructorOk ? (
               <div style={{ display: "flex", border: "1.5px solid rgba(255,255,255,.6)", borderRadius: 8, overflow: "hidden", fontSize: 11.5, fontWeight: 700 }}>
                 {["student","instructor"].map(r => (
-                  <button key={r} onClick={() => { setRole(r); setTab("home"); }} style={{ padding: "5px 10px", border: "none", cursor: "pointer", background: role === r ? "#fff" : "transparent", color: role === r ? "#0E6B5B" : "#fff" }}>{r === "student" ? "학생" : "교수자"}</button>
+                  <button key={r} onClick={() => { setRole(r); setTab(r === "instructor" ? landingTab() : "home"); }} style={{ padding: "5px 10px", border: "none", cursor: "pointer", background: role === r ? "#fff" : "transparent", color: role === r ? "#0E6B5B" : "#fff" }}>{r === "student" ? "학생" : "교수자"}</button>
                 ))}
               </div>
             ) : (
@@ -3465,9 +3470,15 @@ function App() {
             </div>
             {isInstructor ? (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {LINKABLE.includes(runBlock.type) && (runBlock.guide || runBlock.link) && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%", order: -1 }}>
+                    {runBlock.guide && <span style={{ fontSize: 12.5, lineHeight: 1.6, background: "rgba(255,255,255,.12)", borderRadius: 8, padding: "7px 10px" }}>📌 {runBlock.guide}</span>}
+                  </div>
+                )}
                 {(runBlock.type === "QZG" || runBlock.type === "QZS") && <Btn sm onClick={openStepQuiz} style={{ borderColor: "#fff" }}>▶ 이 단계 퀴즈 열기</Btn>}
                 {runBlock.type === "POL" && <Btn sm onClick={() => { setPollDraft({ q: (runBlock.poll && runBlock.poll.q) || runBlock.title, options: (runBlock.poll && runBlock.poll.choices) ? [...runBlock.poll.choices] : [...POLL_SCALE] }); setTab("signal"); }} style={{ borderColor: "#fff" }}>📊 이 단계 투표 열기</Btn>}
                 {LINKABLE.includes(runBlock.type) && runBlock.link && <a href={runBlock.link} target="_blank" rel="noopener noreferrer" className="cpb sm" style={{ borderColor: "#fff", background: "#fff", color: "#0E6B5B", textDecoration: "none" }}>🔗 자료 열기</a>}
+                {LINKABLE.includes(runBlock.type) && !runBlock.link && <span style={{ fontSize: 11.5, opacity: .8 }}>ⓘ 아직 링크가 없습니다 — 아래 표의 ✏️로 지금 추가할 수 있어요</span>}
                 {runBlock.type === "EXT" && <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>Exit 결과 보기</Btn>}
                 <Btn sm onClick={prevStep} disabled={session.step <= 0} style={{ borderColor: "#fff", opacity: session.step <= 0 ? .45 : 1 }}>← 이전 단계</Btn>
                 <Btn sm onClick={nextStep} style={{ borderColor: "#fff" }}>{session.step + 1 >= runFlow.blocks.length ? "수업 종료" : "다음 단계 →"}</Btn>
@@ -3492,6 +3503,78 @@ function App() {
               </div>
             )}
           </div>
+        )}
+
+        {isInstructor && activeRun && (
+          <Card style={{ marginBottom: 12 }}>
+            <Label>플로우 계획 대비 실행 · {activeRun.name} <span style={{ color: "#0E6B5B" }}>● 진행 중 (실시간)</span></Label>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead><tr style={{ color: "#787b82", fontSize: 10.5, textAlign: "left" }}>
+                <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B" }}>단계</th>
+                <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>계획</th>
+                <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>실제</th>
+                <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>차이</th>
+                <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B" }}></th>
+              </tr></thead>
+              <tbody>
+                {activeRun.steps.map((s, k) => {
+                  const liveBlock = runFlow.blocks[k];
+                  return (
+                  <React.Fragment key={liveBlock?.id || k}>
+                  <tr style={session.step === k ? { background: "#EAF5F1" } : undefined}>
+                    <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade" }}>{k + 1}. {s.title}{session.step === k ? " ▶" : ""}</td>
+                    <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{s.plan !== null ? s.plan + "분" : s.dur}</td>
+                    <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{s.actual !== null ? s.actual + "분" : "—"}</td>
+                    <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: s.diff === null ? "#a9aca7" : s.diff > 5 ? "#b3402a" : s.diff < -5 ? "#BA7517" : "#0F6E56" }}>{s.diff === null ? "—" : (s.diff > 0 ? "+" : "") + s.diff + "분"}</td>
+                    <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right" }}>
+                      {liveBlock && (
+                        <button onClick={() => setLiveEditBlock({ id: liveBlock.id, title: liveBlock.title, dur: liveBlock.dur, setId: liveBlock.setId || "", pollQ: (liveBlock.poll && liveBlock.poll.q) || "", pollC: ((liveBlock.poll && liveBlock.poll.choices) || []).join("\n"), guide: liveBlock.guide || "", link: liveBlock.link || "" })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="이 단계 내용 수정">✏️</button>
+                      )}
+                    </td>
+                  </tr>
+                  {liveBlock && liveEditBlock?.id === liveBlock.id && (
+                    <tr>
+                      <td colSpan={5} style={{ padding: "8px 6px", background: "#F7F6F0", borderBottom: "1px dashed #eceade" }}>
+                        <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <input value={liveEditBlock.title} onChange={e => setLiveEditBlock(s2 => ({ ...s2, title: e.target.value }))} placeholder="활동 제목" className="inp" style={{ flex: 2 }} />
+                            <input value={liveEditBlock.dur} onChange={e => setLiveEditBlock(s2 => ({ ...s2, dur: e.target.value }))} placeholder="시간 (예: 10분)" className="inp" style={{ flex: 1 }} />
+                          </div>
+                          {LINKABLE.includes(liveBlock.type) && (
+                            <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              <textarea rows={2} value={liveEditBlock.guide || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, guide: e.target.value }))} placeholder="학생 안내문" className="inp" style={{ resize: "vertical" }} />
+                              <input value={liveEditBlock.link || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, link: e.target.value }))} placeholder="외부 도구 링크 (Notion·Google Docs·Padlet 등 https://…)" className="inp" />
+                            </div>
+                          )}
+                          {liveBlock.type === "POL" && (
+                            <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              <input value={liveEditBlock.pollQ || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, pollQ: e.target.value }))} placeholder="투표 질문" className="inp" />
+                              <textarea rows={3} value={liveEditBlock.pollC || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, pollC: e.target.value }))} placeholder="보기를 한 줄에 하나씩 (2~5개)" className="inp" style={{ resize: "vertical" }} />
+                            </div>
+                          )}
+                          {(liveBlock.type === "QZG" || liveBlock.type === "QZS") && (
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <span style={{ fontSize: 11.5, color: "#787b82", whiteSpace: "nowrap" }}>🔗 연동 문항 세트</span>
+                              <select value={liveEditBlock.setId || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, setId: e.target.value }))} className="inp" style={{ flex: 1 }}>
+                                <option value="">(선택 안 함 — 현재 세트 사용)</option>
+                                {setsList.map(qs => <option key={qs.id} value={qs.id}>{qs.name} ({qs.questions.length}문항)</option>)}
+                              </select>
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 5 }}>
+                            <Btn pri sm onClick={liveBlockSave}>저장</Btn>
+                            <Btn sm onClick={() => setLiveEditBlock(null)}>취소</Btn>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
+                )})}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6 }}>ⓘ 진행 중인 단계는 지금 이 순간까지의 경과 시간으로 계산되어 계속 갱신됩니다. ✏️로 아직 설정하지 못한 링크·문항 등을 지금 바로 채울 수 있습니다. 빨강=계획 초과, 주황=계획 미달.</div>
+          </Card>
         )}
 
         {isExamWeek && (
@@ -3725,8 +3808,10 @@ function App() {
                 </div>
                 {FLOW_TEMPLATES[activeFlow.method] && <div style={{ fontSize: 11, color: "#787b82", marginBottom: 10 }}>ⓘ {activeFlow.method}: {FLOW_TEMPLATES[activeFlow.method].desc}</div>}
                 <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                  {activeFlow.blocks.map((f, i) => (
-                    <div key={f.id} style={{ border: "1.5px solid #d8d6cc", borderRadius: 9, padding: "8px 10px", background: "#fff" }}>
+                  {activeFlow.blocks.map((f, i) => {
+                    const isLive = runFlow && runFlow.id === activeFlow.id && session?.step === i;
+                    return (
+                    <div key={f.id} style={{ border: isLive ? "1.5px solid #0E6B5B" : "1.5px solid #d8d6cc", borderRadius: 9, padding: "8px 10px", background: isLive ? "#EAF5F1" : "#fff" }}>
                       {editBlock?.id === f.id ? (
                         <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                           <div style={{ display: "flex", gap: 6 }}>
@@ -3763,7 +3848,7 @@ function App() {
                       ) : (
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontFamily: "monospace", fontSize: 10, color: "#0E6B5B", fontWeight: 700, minWidth: 30 }}>{f.type}</span>
-                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span>{f.setId && questionSets?.[f.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[f.setId].name}</span>}{f.type === "POL" && f.poll && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 📊{f.poll.q}</span>}{f.link && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗링크</span>}</span>
+                          <span style={{ flex: 1, fontSize: 13 }}>{i + 1}. {f.title} <span style={{ color: "#a9aca7", fontSize: 11 }}>· {f.dur}</span>{f.setId && questionSets?.[f.setId] && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗{questionSets[f.setId].name}</span>}{f.type === "POL" && f.poll && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 📊{f.poll.q}</span>}{f.link && <span style={{ color: "#0E6B5B", fontSize: 10.5 }}> 🔗링크</span>}{isLive && <span style={{ color: "#fff", background: "#0E6B5B", borderRadius: 5, fontSize: 10, fontWeight: 900, padding: "1px 6px", marginLeft: 6 }}>▶ 진행 중</span>}</span>
                           <button onClick={() => setEditBlock({ id: f.id, title: f.title, dur: f.dur, setId: f.setId || "", pollQ: (f.poll && f.poll.q) || "", pollC: ((f.poll && f.poll.choices) || []).join("\n"), guide: f.guide || "", link: f.link || "" })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="수정">✏️</button>
                           <button onClick={() => blockMove(i, -1)} disabled={i === 0} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === 0 ? .25 : 1 }} aria-label="위로">↑</button>
                           <button onClick={() => blockMove(i, 1)} disabled={i === activeFlow.blocks.length - 1} style={{ border: "none", background: "none", fontSize: 14, cursor: "pointer", opacity: i === activeFlow.blocks.length - 1 ? .25 : 1 }} aria-label="아래로">↓</button>
@@ -3771,7 +3856,7 @@ function App() {
                         </div>
                       )}
                     </div>
-                  ))}
+                  )})}
                   {activeFlow.blocks.length === 0 && <div style={{ fontSize: 12.5, color: "#a9aca7", textAlign: "center", padding: "10px 0" }}>아래에서 활동을 추가해 플로우를 구성하세요.</div>}
                 </div>
                 <div style={{ borderTop: "1px dashed #d8d6cc", marginTop: 10, paddingTop: 10 }}>
@@ -4332,77 +4417,28 @@ function App() {
                 {coverage.total === 0 && <div style={{ fontSize: 12, color: "#a9aca7" }}>이번 주 참여 데이터가 아직 없습니다.</div>}
               </Card>
 
-              {displayRun && (
+              {!displayRun?.live && lastRun && (
                 <Card>
-                  <Label>플로우 계획 대비 실행 · {displayRun.name}{displayRun.live && <span style={{ color: "#0E6B5B", marginLeft: 6 }}>● 진행 중 (실시간)</span>}</Label>
+                  <Label>플로우 계획 대비 실행 · {lastRun.name} <span style={{ color: "#a9aca7", fontWeight: 700 }}>(마지막 완료 기록)</span></Label>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <thead><tr style={{ color: "#787b82", fontSize: 10.5, textAlign: "left" }}>
                       <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B" }}>단계</th>
                       <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>계획</th>
                       <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>실제</th>
                       <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B", textAlign: "right" }}>차이</th>
-                      {displayRun.live && <th style={{ padding: "3px 4px", borderBottom: "1.5px solid #24272B" }}></th>}
                     </tr></thead>
                     <tbody>
-                      {displayRun.steps.map((s, k) => {
-                        const liveBlock = displayRun.live && runFlow ? runFlow.blocks[k] : null;
-                        return (
-                        <React.Fragment key={k}>
-                        <tr style={displayRun.live && session.step === k ? { background: "#EAF5F1" } : undefined}>
-                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade" }}>{k + 1}. {s.title}{displayRun.live && session.step === k ? " ▶" : ""}</td>
+                      {lastRun.steps.map((s, k) => (
+                        <tr key={k}>
+                          <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade" }}>{k + 1}. {s.title}</td>
                           <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{s.plan !== null ? s.plan + "분" : s.dur}</td>
                           <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace" }}>{s.actual !== null ? s.actual + "분" : "—"}</td>
                           <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: s.diff === null ? "#a9aca7" : s.diff > 5 ? "#b3402a" : s.diff < -5 ? "#BA7517" : "#0F6E56" }}>{s.diff === null ? "—" : (s.diff > 0 ? "+" : "") + s.diff + "분"}</td>
-                          {displayRun.live && (
-                            <td style={{ padding: "5px 4px", borderBottom: "1px dashed #eceade", textAlign: "right" }}>
-                              {liveBlock && (
-                                <button onClick={() => setLiveEditBlock({ id: liveBlock.id, title: liveBlock.title, dur: liveBlock.dur, setId: liveBlock.setId || "", pollQ: (liveBlock.poll && liveBlock.poll.q) || "", pollC: ((liveBlock.poll && liveBlock.poll.choices) || []).join("\n"), guide: liveBlock.guide || "", link: liveBlock.link || "" })} style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer" }} aria-label="이 단계 내용 수정">✏️</button>
-                              )}
-                            </td>
-                          )}
                         </tr>
-                        {displayRun.live && liveBlock && liveEditBlock?.id === liveBlock.id && (
-                          <tr>
-                            <td colSpan={5} style={{ padding: "8px 6px", background: "#F7F6F0", borderBottom: "1px dashed #eceade" }}>
-                              <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                <div style={{ display: "flex", gap: 6 }}>
-                                  <input value={liveEditBlock.title} onChange={e => setLiveEditBlock(s2 => ({ ...s2, title: e.target.value }))} placeholder="활동 제목" className="inp" style={{ flex: 2 }} />
-                                  <input value={liveEditBlock.dur} onChange={e => setLiveEditBlock(s2 => ({ ...s2, dur: e.target.value }))} placeholder="시간 (예: 10분)" className="inp" style={{ flex: 1 }} />
-                                </div>
-                                {LINKABLE.includes(liveBlock.type) && (
-                                  <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                    <textarea rows={2} value={liveEditBlock.guide || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, guide: e.target.value }))} placeholder="학생 안내문" className="inp" style={{ resize: "vertical" }} />
-                                    <input value={liveEditBlock.link || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, link: e.target.value }))} placeholder="외부 도구 링크 (Notion·Google Docs·Padlet 등 https://…)" className="inp" />
-                                  </div>
-                                )}
-                                {liveBlock.type === "POL" && (
-                                  <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                    <input value={liveEditBlock.pollQ || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, pollQ: e.target.value }))} placeholder="투표 질문" className="inp" />
-                                    <textarea rows={3} value={liveEditBlock.pollC || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, pollC: e.target.value }))} placeholder="보기를 한 줄에 하나씩 (2~5개)" className="inp" style={{ resize: "vertical" }} />
-                                  </div>
-                                )}
-                                {(liveBlock.type === "QZG" || liveBlock.type === "QZS") && (
-                                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                                    <span style={{ fontSize: 11.5, color: "#787b82", whiteSpace: "nowrap" }}>🔗 연동 문항 세트</span>
-                                    <select value={liveEditBlock.setId || ""} onChange={e => setLiveEditBlock(s2 => ({ ...s2, setId: e.target.value }))} className="inp" style={{ flex: 1 }}>
-                                      <option value="">(선택 안 함 — 현재 세트 사용)</option>
-                                      {setsList.map(qs => <option key={qs.id} value={qs.id}>{qs.name} ({qs.questions.length}문항)</option>)}
-                                    </select>
-                                  </div>
-                                )}
-                                <div style={{ display: "flex", gap: 5 }}>
-                                  <Btn pri sm onClick={liveBlockSave}>저장</Btn>
-                                  <Btn sm onClick={() => setLiveEditBlock(null)}>취소</Btn>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                        </React.Fragment>
-                      )})}
+                      ))}
                     </tbody>
                   </table>
-                  <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6 }}>{displayRun.live ? "ⓘ 진행 중인 단계는 지금 이 순간까지의 경과 시간으로 계산되어 계속 갱신됩니다. ✏️로 아직 설정하지 못한 링크·문항 등을 지금 바로 채울 수 있습니다." : "ⓘ 플로우를 [수업 종료]까지 진행하면 기록됩니다."} 빨강=계획 초과, 주황=계획 미달.</div>
+                  <div style={{ fontSize: 10.5, color: "#787b82", marginTop: 6 }}>ⓘ 플로우를 [수업 종료]까지 진행하면 기록됩니다. 빨강=계획 초과, 주황=계획 미달. (지금 진행 중인 수업의 실시간 현황은 상단 배너 아래 표에 나타납니다.)</div>
                 </Card>
               )}
 
