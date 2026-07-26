@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9.13";
+const APP_VERSION = "LIVE 2.10.0";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2436,6 +2436,7 @@ function App() {
   const [answers, setAnswers] = useState({});
   const [signals, setSignals] = useState({});
   const [questionsQ, setQuestionsQ] = useState({});
+  const [sgq, setSgq] = useState({}); // 학생 출제(SGQ) 제출함
   const [exitR, setExitR] = useState({});
   const [conf, setConf] = useState({ joinCode: "4A79K2", pin: "1234" });
   const [flows, setFlows] = useState({});
@@ -2473,7 +2474,7 @@ function App() {
     // 주차 전환 시 로컬 상태 초기화 후 해당 주차 구독
     setQuiz({ status: "idle", qIndex: 0, qEndsAt: 0, timeLimit: 20, questions: SEED_QUESTIONS });
     setPlayers({}); setAnswers({}); setSignals({}); setQuestionsQ({}); setExitR({}); setSession(null); setPoll(null); setQuizHist({});
-    setFlows({}); setActiveFlowIdW(null); setSigLog({}); setFlowRuns({}); setMyReport(null);
+    setFlows({}); setActiveFlowIdW(null); setSigLog({}); setFlowRuns({}); setMyReport(null); setSgq({});
     const subs = [
       [RW("quiz"), s => { const v = s.val(); if (v) setQuiz(q => ({ ...q, ...v, questions: v.questions || SEED_QUESTIONS })); }],
       [RW("players"), s => setPlayers(s.val() || {})],
@@ -2488,6 +2489,7 @@ function App() {
       [RW("flowRuns"), s => setFlowRuns(s.val() || {})],
       [RW("flows"), s => setFlows(s.val() || {})],
       [RW("activeFlowId"), s => setActiveFlowIdW(s.val())],
+      [RW("sgq"), s => setSgq(s.val() || {})],
     ];
     subs.forEach(([ref, cb]) => ref.on("value", cb));
     return () => subs.forEach(([ref, cb]) => ref.off("value", cb));
@@ -2522,6 +2524,7 @@ function App() {
   const [editBlock, setEditBlock] = useState(null); // 플로우 블록 편집
   const [liveEditBlock, setLiveEditBlock] = useState(null); // 수업 진행 중 · 현재 플로우의 단계 내용 수정
   const [pollDraft, setPollDraft] = useState(null); // 투표 만들기 폼
+  const [sgqDraft, setSgqDraft] = useState(null); // 학생 출제 — 문항 제출 폼
   const [anaTab, setAnaTab] = useState("week"); // 분석 섹션
   const [flowEditOpen, setFlowEditOpen] = useState(false); // 플로우 상세편집 펼침 여부 (기본 접힘)
   const [saDraft, setSaDraft] = useState(""); // 단답·서술 입력
@@ -2729,6 +2732,24 @@ function App() {
     setQDraft(""); notify("질문이 익명으로 등록되었습니다.");
   };
   const voteQuestion = (qid, voted) => voted ? RW("questions/"+qid+"/votes/"+me.id).remove() : RW("questions/"+qid+"/votes/"+me.id).set(true);
+
+  /* ---------- 학생 출제 (SGQ) ---------- */
+  const submitSGQ = () => {
+    if (!sgqDraft) return;
+    if (!sgqDraft.q.trim()) return notify("문항 내용을 입력해 주세요.");
+    const cs = sgqDraft.choices.map(c => c.trim()).filter(Boolean);
+    if (cs.length < 2) return notify("보기를 2개 이상 입력해 주세요.");
+    RW("sgq/" + uid()).set({ q: sgqDraft.q.trim(), choices: cs, answer: Math.min(sgqDraft.answer, cs.length - 1), author: me.nick, authorId: me.id, createdAt: serverNow(), promoted: false });
+    setSgqDraft(null); notify("문항이 제출되었습니다 — 교수님이 검토 후 퀴즈에 반영할 수 있어요.");
+  };
+  const promoteSGQ = id => {
+    const item = sgq[id]; if (!item || !curSet) return notify("먼저 문항 세트를 선택해 주세요.");
+    const obj = { type: "MC", q: item.q, choices: item.choices, answer: item.answer, expl: "학생 출제 (" + (item.author || "익명") + ")" };
+    R("questionSets/" + curSet.id + "/questions").set([...curSet.questions, obj]);
+    RW("sgq/" + id + "/promoted").set(true);
+    notify("'" + curSet.name + "' 세트에 추가했습니다.");
+  };
+  const deleteSGQ = id => askConfirm("문항 삭제", "제출된 이 문항을 삭제할까요?", () => RW("sgq/" + id).remove());
 
   /* ---------- Exit Ticket ---------- */
   const myExit = exitR?.[me.id];
@@ -3551,6 +3572,7 @@ function App() {
                 )}
                 {(runBlock.type === "QZG" || runBlock.type === "QZS") && <Btn sm onClick={openStepQuiz} style={{ borderColor: "#fff" }}>▶ 이 단계 퀴즈 열기</Btn>}
                 {runBlock.type === "POL" && <Btn sm onClick={() => { setPollDraft({ q: (runBlock.poll && runBlock.poll.q) || runBlock.title, options: (runBlock.poll && runBlock.poll.choices) ? [...runBlock.poll.choices] : [...POLL_SCALE] }); setTab("signal"); }} style={{ borderColor: "#fff" }}>📊 이 단계 투표 열기</Btn>}
+                {runBlock.type === "SGQ" && <Btn sm onClick={() => setTab("quiz")} style={{ borderColor: "#fff" }}>📝 학생 출제 검토함 열기{Object.values(sgq||{}).some(x=>!x.promoted) && " (" + Object.values(sgq).filter(x=>!x.promoted).length + ")"}</Btn>}
                 {LINKABLE.includes(runBlock.type) && runBlock.link && <a href={runBlock.link} target="_blank" rel="noopener noreferrer" className="cpb sm" style={{ borderColor: "#fff", background: "#fff", color: "#0E6B5B", textDecoration: "none" }}>🔗 자료 열기</a>}
                 {LINKABLE.includes(runBlock.type) && !runBlock.link && <span style={{ fontSize: 11.5, opacity: .8 }}>ⓘ 아직 링크가 없습니다 — 아래 표의 ✏️로 지금 추가할 수 있어요</span>}
                 {runBlock.type === "EXT" && <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>Exit 결과 보기</Btn>}
@@ -3564,6 +3586,8 @@ function App() {
                   ? <Btn sm onClick={() => setTab("quiz")} style={{ borderColor: "#fff" }}>▶ 퀴즈 참여하기</Btn>
                   : runBlock.type === "POL" && poll?.status === "open"
                   ? <Btn sm onClick={() => setTab("signal")} style={{ borderColor: "#fff" }}>📊 투표 참여하기</Btn>
+                  : runBlock.type === "SGQ"
+                  ? <Btn sm onClick={() => setTab("quiz")} style={{ borderColor: "#fff" }}>📝 문항 제출하러 가기</Btn>
                   : runBlock.type === "EXT"
                   ? <Btn sm onClick={() => setTab("exit")} style={{ borderColor: "#fff" }}>⏻ Exit Ticket 제출하기</Btn>
                   : LINKABLE.includes(runBlock.type)
@@ -3926,6 +3950,26 @@ function App() {
         {tab === "quiz" && (
           <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {isInstructor ? (<React.Fragment>
+              {Object.keys(sgq || {}).length > 0 && (
+                <Card>
+                  <Label>📝 학생 출제 검토함 ({Object.values(sgq).filter(x => !x.promoted).length}건 대기)</Label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {Object.entries(sgq).sort((a, b) => (a[1].createdAt||0) - (b[1].createdAt||0)).map(([id, x]) => (
+                      <div key={id} style={{ border: "1.5px solid " + (x.promoted ? "#d8d6cc" : "#0E6B5B"), borderRadius: 9, padding: "8px 10px", background: x.promoted ? "#faf9f4" : "#fff" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>{x.q}</div>
+                        <div style={{ fontSize: 11.5, color: "#787b82", margin: "4px 0" }}>{(x.choices||[]).map((c, i) => <span key={i} style={{ marginRight: 10 }}>{i === x.answer ? "✅ " : ""}{c}</span>)}</div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: 10.5, color: "#a9aca7" }}>제출: {x.author || "익명"}{x.promoted && " · ✔ 세트에 반영됨"}</span>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            {!x.promoted && <Btn sm pri onClick={() => promoteSGQ(id)}>+ 문항 세트에 추가</Btn>}
+                            <Btn sm onClick={() => deleteSGQ(id)} style={{ color: "#b3402a" }}>삭제</Btn>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
               {quiz.status === "idle" && (
                 <Card>
                   <Label>문항 세트 관리</Label>
@@ -4136,6 +4180,38 @@ function App() {
                 </Card>
               )}
             </React.Fragment>) : (<React.Fragment>
+              {runBlock?.type === "SGQ" && (
+                <Card>
+                  <Label>📝 학생 출제 — 문항 만들기</Label>
+                  {runBlock.guide && <div style={{ fontSize: 12.5, color: "#55585f", background: "#faf9f4", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>📌 {runBlock.guide}</div>}
+                  {sgqDraft ? (
+                    <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <input value={sgqDraft.q} onChange={e => setSgqDraft(s => ({ ...s, q: e.target.value }))} placeholder="문항 내용 (질문)" className="inp" />
+                      {sgqDraft.choices.map((c, i) => (
+                        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <button onClick={() => setSgqDraft(s => ({ ...s, answer: i }))} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 15, color: sgqDraft.answer === i ? "#0E6B5B" : "#d8d6cc" }} aria-label="정답으로 표시">{sgqDraft.answer === i ? "✅" : "⚪"}</button>
+                          <input value={c} onChange={e => setSgqDraft(s => ({ ...s, choices: s.choices.map((x, j) => j === i ? e.target.value : x) }))} placeholder={"보기 " + (i + 1) + (i >= 2 ? " (선택)" : "")} className="inp" style={{ flex: 1 }} />
+                        </div>
+                      ))}
+                      <div style={{ fontSize: 10.5, color: "#787b82" }}>⚪를 눌러 정답 보기를 표시하세요.</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Btn pri sm onClick={submitSGQ}>제출</Btn>
+                        <Btn sm onClick={() => setSgqDraft(null)}>취소</Btn>
+                      </div>
+                    </div>
+                  ) : (
+                    <Btn pri onClick={() => setSgqDraft({ q: "", choices: ["", "", "", ""], answer: 0 })}>+ 문항 만들어 제출하기</Btn>
+                  )}
+                  {Object.values(sgq || {}).some(x => x.authorId === me.id) && (
+                    <div style={{ marginTop: 10, borderTop: "1px dashed #d8d6cc", paddingTop: 8 }}>
+                      <div style={{ fontSize: 10.5, color: "#787b82", fontWeight: 900, marginBottom: 6 }}>내가 제출한 문항</div>
+                      {Object.values(sgq).filter(x => x.authorId === me.id).map((x, i) => (
+                        <div key={i} style={{ fontSize: 12, padding: "4px 0", color: "#55585f" }}>· {x.q} {x.promoted && <span style={{ color: "#0E6B5B", fontWeight: 700 }}>✔ 퀴즈에 반영됨</span>}</div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              )}
               {quiz.status === "idle" && (
                 <Card style={{ textAlign: "center" }}>
                   <div style={{ color: "#787b82", fontSize: 13, marginBottom: 10 }}>아직 열린 퀴즈가 없습니다.<br />교수님이 대기실을 열면 즉시 이 화면에 나타납니다.</div>
@@ -4236,6 +4312,7 @@ function App() {
           <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {/* ----- 즉석 투표 (POL) ----- */}
             {isInstructor ? (
+              (runBlock?.type === "POL" || poll || pollDraft) ? (
               <Card>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <Label>📊 즉석 투표</Label>
@@ -4276,6 +4353,12 @@ function App() {
                   <div style={{ fontSize: 12.5, color: "#a9aca7" }}>진행 중인 투표가 없습니다. 플로우의 POL 단계에서 [투표 열기]를 누르면 질문이 자동으로 채워집니다.</div>
                 )}
               </Card>
+              ) : (
+                <Card>
+                  <div style={{ fontSize: 12.5, color: "#a9aca7" }}>현재 단계({ACT_TYPES[runBlock?.type] || "-"})는 투표 활동이 아닙니다 — 위 배너·실시간 표를 참고하세요. 필요하면 여기서 즉석 투표를 새로 만들 수도 있습니다.</div>
+                  <Btn sm onClick={() => setPollDraft({ q: "", options: ["", "", "", ""] })} style={{ marginTop: 8 }}>+ 투표 만들기</Btn>
+                </Card>
+              )
             ) : (
               poll && (
                 <Card>
