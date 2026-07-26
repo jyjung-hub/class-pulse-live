@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9.11";
+const APP_VERSION = "LIVE 2.9.12";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2523,6 +2523,7 @@ function App() {
   const [liveEditBlock, setLiveEditBlock] = useState(null); // 수업 진행 중 · 현재 플로우의 단계 내용 수정
   const [pollDraft, setPollDraft] = useState(null); // 투표 만들기 폼
   const [anaTab, setAnaTab] = useState("week"); // 분석 섹션
+  const [flowEditOpen, setFlowEditOpen] = useState(false); // 플로우 상세편집 펼침 여부 (기본 접힘)
   const [saDraft, setSaDraft] = useState(""); // 단답·서술 입력
   const [myReport, setMyReport] = useState(null); // 학생 내 리포트
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
@@ -3648,15 +3649,23 @@ function App() {
         {/* ==================== 플로우 상세 편집 (교수자 · 모든 화면) ==================== */}
         {isInstructor && flowList.length > 0 && (
           <Card style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
-              <div style={{ fontWeight: 900, fontSize: 14 }}>✏️ {activeFlow.name}</div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {!runFlow && <Btn pri sm onClick={startFlowSession}>▶ 이 플로우로 수업 시작</Btn>}
-                <Btn sm onClick={renameFlow}>이름 변경</Btn>
-                <Btn sm onClick={dupFlow}>복제</Btn>
-                <Btn sm onClick={delFlow} style={{ color: "#b3402a" }}>삭제</Btn>
-              </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: flowEditOpen ? 4 : 0 }}>
+              <button onClick={() => setFlowEditOpen(o => !o)} style={{ border: "none", background: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit" }}>
+                <span style={{ fontSize: 12, color: "#787b82" }}>{flowEditOpen ? "▾" : "▸"}</span>
+                <span style={{ fontWeight: 900, fontSize: 14 }}>✏️ {activeFlow.name} 상세편집</span>
+                {!flowEditOpen && <span style={{ fontSize: 11, color: "#a9aca7" }}>· {activeFlow.blocks.length}단계 · 필요할 때 펼쳐서 편집하세요</span>}
+              </button>
+              {flowEditOpen && (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {!runFlow && <Btn pri sm onClick={startFlowSession}>▶ 이 플로우로 수업 시작</Btn>}
+                  <Btn sm onClick={renameFlow}>이름 변경</Btn>
+                  <Btn sm onClick={dupFlow}>복제</Btn>
+                  <Btn sm onClick={delFlow} style={{ color: "#b3402a" }}>삭제</Btn>
+                </div>
+              )}
             </div>
+            {flowEditOpen && (
+            <React.Fragment>
             {FLOW_TEMPLATES[activeFlow.method] && <div style={{ fontSize: 11, color: "#787b82", marginBottom: 10 }}>ⓘ {activeFlow.method}: {FLOW_TEMPLATES[activeFlow.method].desc}</div>}
             {runFlow && runFlow.id === activeFlow.id ? (
               <div style={{ fontSize: 12.5, color: "#787b82", background: "#F7F6F0", borderRadius: 9, padding: "10px 12px" }}>
@@ -3747,6 +3756,8 @@ function App() {
               )}
               <div style={{ fontSize: 11, color: "#787b82", marginTop: 8 }}>ⓘ 신호등(SIG)은 별도 배치 없이도 세션 전체에 상시 가동됩니다. 플로우는 실시간으로 저장·공유됩니다.</div>
             </div>
+            </React.Fragment>
+            )}
           </Card>
         )}
 
