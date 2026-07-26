@@ -10,6 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script>
 /* xlsx-js-style 1.2.0 (Apache-2.0) — 내장본: 외부 CDN 불필요, 색상 서식 지원 */
 /* xlsx-js-style 1.2.0-beta @ 2022-04-05T01:40:48.447Z */
@@ -2333,6 +2334,7 @@ const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달
 const SHAPES = ["▲","◆","●","■","★"];
 const uid = () => Math.random().toString(36).slice(2, 10);
 const configured = !Object.values(FIREBASE_CONFIG).some(v => String(v).includes("여기에"));
+if (configured) { firebase.initializeApp(FIREBASE_CONFIG); }
 
 const SEED_QUESTIONS = [
   { q: "ADDIE 모형에서 형성평가가 처음 수행되는 단계는?", choices: ["분석 (Analysis)","설계 (Design)","개발 (Development)","실행 (Implementation)"], answer: 2, expl: "형성평가는 개발 단계에서 프로토타입을 대상으로 처음 수행되어 산출물을 개선합니다." },
@@ -2406,9 +2408,26 @@ function SetupScreen() {
   );
 }
 
+function AuthGate({ children }) {
+  const [ready, setReady] = useState(false);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    const unsub = firebase.auth().onAuthStateChanged(user => { if (user) setReady(true); });
+    firebase.auth().signInAnonymously().catch(e => setErr(e.message));
+    return unsub;
+  }, []);
+  if (err) return (
+    <div style={{ maxWidth: 520, margin: "40px auto", padding: 16, fontFamily: "'Noto Sans KR',sans-serif" }}>
+      <Card><div style={{ fontSize: 14, color: "#b3402a" }}>연결 오류: {err}<br />Firebase 콘솔 &gt; Authentication에서 익명 로그인이 사용 설정되어 있는지 확인하세요.</div></Card>
+    </div>
+  );
+  if (!ready) return <div style={{ padding: 40, textAlign: "center", color: "#787b82", fontFamily: "'Noto Sans KR',sans-serif" }}>연결 중…</div>;
+  return children;
+}
+
 function App() {
   /* ---------- Firebase 연결 ---------- */
-  const db = useMemo(() => { firebase.initializeApp(FIREBASE_CONFIG); return firebase.database(); }, []);
+  const db = useMemo(() => firebase.database(), []);
   const R = p => db.ref(ROOM + "/" + p);
 
   /* ---------- 실시간 상태 구독 ---------- */
@@ -4572,7 +4591,7 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(configured ? <App /> : <SetupScreen />);
+ReactDOM.createRoot(document.getElementById("root")).render(configured ? <AuthGate><App /></AuthGate> : <SetupScreen />);
 
 </script>
 </body>
