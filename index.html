@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9.2";
+const APP_VERSION = "LIVE 2.9.3";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2535,6 +2535,8 @@ function App() {
   const askText = (title, desc, initial, placeholder, ok) => setDlg({ mode: "prompt", title, desc, value: initial || "", placeholder, ok });
   const askConfirm = (title, desc, ok) => setDlg({ mode: "confirm", title, desc, ok });
   const isInstructor = role === "instructor" && instructorOk;
+  // 학생 화면: 교수자가 단계를 이동(앞/뒤 모두)하면 이전 단계에 머물러 있던 탭(퀴즈·투표 등)을 정리하고 현재 단계 배너로 되돌림
+  useEffect(() => { if (!isInstructor) setTab("home"); }, [session?.flowId, session?.step]);
   const refreshSem = () => db.ref(ROOM + "/weeks").once("value").then(s => setSemData(s.val() || {})).catch(() => {});
   useEffect(() => { if (isInstructor && (tab === "home" || tab === "analytics")) refreshSem(); }, [isInstructor, tab, W]);
   const semWeek = w => {
