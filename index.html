@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.9.7";
+const APP_VERSION = "LIVE 2.9.8";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2536,7 +2536,7 @@ function App() {
   const askConfirm = (title, desc, ok) => setDlg({ mode: "confirm", title, desc, ok });
   const isInstructor = role === "instructor" && instructorOk;
   // 단계가 바뀌면(앞/뒤 모두) 학생은 홈으로, 교수자는 현재 활동에 맞는 탭으로 자동 전환
-  useEffect(() => { setTab(isInstructor ? landingTab() : "home"); }, [session?.flowId, session?.step]);
+  useEffect(() => { if (isInstructor) gotoLanding(); else setTab("home"); }, [session?.flowId, session?.step]);
   const refreshSem = () => db.ref(ROOM + "/weeks").once("value").then(s => setSemData(s.val() || {})).catch(() => {});
   useEffect(() => { if (isInstructor && (tab === "home" || tab === "analytics")) refreshSem(); }, [isInstructor, tab, W]);
   const semWeek = w => {
@@ -3392,11 +3392,16 @@ function App() {
   // 교수자가 (재)접속했을 때 착지할 탭 — 수업이 진행 중이면 학기 대시보드 대신 현재 활동 화면으로
   const landingTab = () => {
     if (!runFlow || !runBlock) return "home";
-    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "analytics";
+    return { QZG: "quiz", QZS: "quiz", POL: "signal", EXT: "exit" }[runBlock.type] || "flow";
+  };
+  const gotoLanding = () => {
+    const t = landingTab();
+    if (t === "flow" && runFlow) setActiveFlow(runFlow.id);
+    setTab(t);
   };
   const verifyPin = () => {
     if (pinDraft.trim() !== (conf.pin || "1234")) { setPinDraft(""); return notify("PIN이 일치하지 않습니다."); }
-    setInstructorOk(true); setPinOpen(false); setRole("instructor"); setTab(landingTab());
+    setInstructorOk(true); setPinOpen(false); setRole("instructor"); gotoLanding();
     notify("교수자 모드로 전환되었습니다.");
   };
   const resetAll = () => askConfirm("전체 초기화", "퀴즈·신호·질문·Exit 데이터를 모두 지울까요? (문항·코드·PIN 유지)", async () => {
@@ -3441,7 +3446,7 @@ function App() {
             {instructorOk ? (
               <div style={{ display: "flex", border: "1.5px solid rgba(255,255,255,.6)", borderRadius: 8, overflow: "hidden", fontSize: 11.5, fontWeight: 700 }}>
                 {["student","instructor"].map(r => (
-                  <button key={r} onClick={() => { setRole(r); setTab(r === "instructor" ? landingTab() : "home"); }} style={{ padding: "5px 10px", border: "none", cursor: "pointer", background: role === r ? "#fff" : "transparent", color: role === r ? "#0E6B5B" : "#fff" }}>{r === "student" ? "학생" : "교수자"}</button>
+                  <button key={r} onClick={() => { setRole(r); if (r === "instructor") gotoLanding(); else setTab("home"); }} style={{ padding: "5px 10px", border: "none", cursor: "pointer", background: role === r ? "#fff" : "transparent", color: role === r ? "#0E6B5B" : "#fff" }}>{r === "student" ? "학생" : "교수자"}</button>
                 ))}
               </div>
             ) : (
