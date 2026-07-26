@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.11.0";
+const APP_VERSION = "LIVE 2.11.1";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -4428,7 +4428,7 @@ function App() {
                 </Card>
               )
             ) : (
-              poll && (
+              poll && runBlock?.type === "POL" && (
                 <Card>
                   <Label>📊 즉석 투표{poll.status === "closed" ? " · 결과" : ""}</Label>
                   <div style={{ fontSize: 13.5, fontWeight: 900, marginBottom: 8 }}>{poll.q}</div>
