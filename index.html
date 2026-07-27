@@ -2328,7 +2328,7 @@ const FIREBASE_CONFIG = {
 /* ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
 
 const ROOM = "class-pulse-demo"; // 강좌별로 바꾸면 데이터가 분리됩니다 (예: "edu101-2026-2")
-const APP_VERSION = "LIVE 2.13.0";
+const APP_VERSION = "LIVE 2.14.0";
 const ANIMALS = ["여우","부엉이","펭귄","거북","수달","고래","토끼","사자","다람쥐","돌고래","판다","매"];
 const EMOJI = {여우:"🦊",부엉이:"🦉",펭귄:"🐧",거북:"🐢",수달:"🦦",고래:"🐋",토끼:"🐰",사자:"🦁",다람쥐:"🐿️",돌고래:"🐬",판다:"🐼",매:"🦅"};
 const SHAPES = ["▲","◆","●","■","★"];
@@ -2572,7 +2572,103 @@ function App() {
     for (let w = 1; w <= 15; w++) { const x = semWeek(w); if (!x.empty) act++; graded += x.gradedN; if (x.people) { s += x.people; n++; } }
     return { act, graded, avg: n ? Math.round(s / n) : 0 };
   })();
+  const loadMyReport = async () => {
+    if (myReport) return setMyReport(null);
+    try {
+      const snap = await db.ref(ROOM + "/weeks").once("value");
+      const weeks = snap.val() || {};
+      const quizRows = []; const wrongList = []; const sigAll = []; const gapTrend = [];
+      const weekAccMap = {}; const classAccByWeek = {};
+      let sum = 0, tot = 0, gSum = 0, gTot = 0, pSum = 0, pTot = 0, exitN = 0, weeksParticipated = 0, weeksTotal = 0;
+
+      for (let w = 1; w <= 15; w++) {
+        const d = weeks["w" + w] || {};
+        if (Object.keys(d).length > 0) weeksTotal++;
+        let participated = false, weekMine = 0, weekN = 0;
+
+        Object.values(d.quizHistory || {}).forEach(h => {
+          const qs = h.questions || [];
+          let mine = 0, cnt = 0;
+          Object.entries(h.answers || {}).forEach(([qi, m]) => {
+            const x = (m || {})[me.id];
+            if (x !== undefined) {
+              cnt++;
+              const q = qs[qi];
+              if (isCorrect(q, x)) mine++;
+              else wrongList.push({ w, setName: h.setName, q, myAns: x, graded: !!h.graded });
+            }
+          });
+          if (cnt > 0) {
+            quizRows.push({ w, name: h.setName, mine, n: qs.length, graded: !!h.graded });
+            sum += mine; tot += qs.length;
+            if (h.graded) { gSum += mine; gTot += qs.length; } else { pSum += mine; pTot += qs.length; }
+            weekMine += mine; weekN += qs.length; participated = true;
+          }
+          const perStu = {};
+          Object.entries(h.answers || {}).forEach(([qi, m]) => Object.entries(m || {}).forEach(([pid, a]) => {
+            if (!perStu[pid]) perStu[pid] = { c: 0, n: 0 };
+            perStu[pid].n++; if (isCorrect(qs[qi], a)) perStu[pid].c++;
+          }));
+          Object.entries(perStu).forEach(([pid, s]) => { if (s.n) { (classAccByWeek[w] = classAccByWeek[w] || []).push({ pid, acc: s.c / s.n }); } });
+        });
+        if (weekN > 0) weekAccMap[w] = { mine: weekMine, n: weekN, acc: Math.round(weekMine / weekN * 100) };
+
+        const myEx = (d.exit || {})[me.id];
+        if (myEx) {
+          exitN++; participated = true;
+          if (weekAccMap[w]) {
+            const acc = weekAccMap[w].acc;
+            gapTrend.push({ w, scale: myEx.scale, acc, kind: myEx.scale >= 4 && acc < 50 ? "over" : myEx.scale <= 2 && acc >= 70 ? "under" : "ok" });
+          }
+        }
+        Object.values(d.sigLog || {}).forEach(x => { if (x.studentId === me.id) { sigAll.push({ w, ...x }); participated = true; } });
+        if (participated) weeksParticipated++;
+      }
+
+      const sigTotal = sigAll.length;
+      const sigG = sigAll.filter(x => x.v === "g").length, sigY = sigAll.filter(x => x.v === "y").length, sigR = sigAll.filter(x => x.v === "r").length;
+
+      const byType = {};
+      sigAll.forEach(x => { const t = ACT_TYPES[x.stepType] || "기타"; if (!byType[t]) byType[t] = { g: 0, y: 0, r: 0, total: 0 }; byType[t][x.v]++; byType[t].total++; });
+
+      const changesByWeek = {};
+      for (let w = 1; w <= 15; w++) changesByWeek[w] = sigAll.filter(x => x.w === w).length;
+      const topVolatile = Object.entries(changesByWeek).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+      const metaBuckets = { green: { sum: 0, tot: 0 }, yellow: { sum: 0, tot: 0 }, red: { sum: 0, tot: 0 } };
+      for (let w = 1; w <= 15; w++) {
+        const list = sigAll.filter(x => x.w === w);
+        if (!list.length || !weekAccMap[w]) continue;
+        const g = list.filter(x => x.v === "g").length, y = list.filter(x => x.v === "y").length, r = list.filter(x => x.v === "r").length;
+        const dom = g >= y && g >= r ? "green" : r >= y ? "red" : "yellow";
+        metaBuckets[dom].sum += weekAccMap[w].mine; metaBuckets[dom].tot += weekAccMap[w].n;
+      }
+
+      let myPercentile = null;
+      const allAccs = [], myAccs = [];
+      Object.entries(classAccByWeek).forEach(([w, arr]) => { arr.forEach(x => allAccs.push(x.acc)); const mine = arr.find(x => x.pid === me.id); if (mine) myAccs.push(mine.acc); });
+      if (allAccs.length && myAccs.length) {
+        const myAvg = myAccs.reduce((a, b) => a + b, 0) / myAccs.length;
+        myPercentile = Math.round(allAccs.filter(a => a <= myAvg).length / allAccs.length * 100);
+      }
+
+      const trendWeeks = Object.entries(weekAccMap).map(([w, v]) => ({ w: Number(w), acc: v.acc })).sort((a, b) => a.w - b.w);
+      let trendComment = null;
+      if (trendWeeks.length >= 3) {
+        const last3 = trendWeeks.slice(-3);
+        if (last3[0].acc < last3[1].acc && last3[1].acc < last3[2].acc) trendComment = "최근 3주 연속 정답률이 상승하고 있어요! 좋은 흐름이에요 👏";
+        else if (last3[last3.length - 1].acc - last3[0].acc >= 20) trendComment = "최근 정답률이 크게 올랐어요 — 노력이 결과로 나타나고 있습니다!";
+      }
+
+      setMyReport({
+        quizRows, sum, tot, gSum, gTot, pSum, pTot, wrongList, myPercentile, trendWeeks, trendComment, exitN, gapTrend,
+        sig: { total: sigTotal, g: sigTotal ? Math.round(sigG / sigTotal * 100) : 0, y: sigTotal ? Math.round(sigY / sigTotal * 100) : 0, r: sigTotal ? Math.round(sigR / sigTotal * 100) : 0 },
+        byType, topVolatile, metaBuckets, participation: { weeksParticipated, weeksTotal },
+      });
+    } catch (e) { notify("리포트를 불러오지 못했습니다."); }
+  };
   const renameMe = () => askText("표시이름 설정", "성적 반영 퀴즈에서는 학번+이름(예: 20261234 홍길동)으로 설정해 주세요.", me.nick, "표시이름", v => {
+
     if (!v.trim()) { notify("표시이름을 입력해 주세요."); return false; }
     const next = { ...me, nick: v.trim() };
     setMe(next);
@@ -4033,41 +4129,90 @@ function App() {
             </Card>
             <Card>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div><div style={{ fontWeight: 900, fontSize: 13.5 }}>📈 내 학습 리포트</div><div style={{ fontSize: 11.5, color: "#787b82" }}>학기 퀴즈 성적과 참여 이력 (본인만 표시)</div></div>
-                <Btn onClick={async () => {
-                  if (myReport) return setMyReport(null);
-                  try {
-                    const snap = await db.ref(ROOM + "/weeks").once("value");
-                    const weeks = snap.val() || {};
-                    const rows = []; let sum = 0, tot = 0, exitN = 0;
-                    for (let w = 1; w <= 15; w++) {
-                      const d = weeks["w" + w] || {};
-                      Object.values(d.quizHistory || {}).forEach(h => {
-                        const qs = h.questions || []; let mine = 0, cnt = 0;
-                        Object.entries(h.answers || {}).forEach(([qi, m]) => { const x = (m || {})[me.id]; if (x !== undefined) { cnt++; if (isCorrect(qs[qi], x)) mine++; } });
-                        if (cnt > 0) { rows.push({ w, name: h.setName, mine, n: qs.length, graded: !!h.graded }); sum += mine; tot += qs.length; }
-                      });
-                      if ((d.exit || {})[me.id]) exitN++;
-                    }
-                    setMyReport({ rows, sum, tot, exitN });
-                  } catch (e) { notify("리포트를 불러오지 못했습니다."); }
-                }}>{myReport ? "닫기" : "보기"}</Btn>
+                <div><div style={{ fontWeight: 900, fontSize: 13.5 }}>📈 내 학습 리포트</div><div style={{ fontSize: 11.5, color: "#787b82" }}>퀴즈·신호등·Exit 종합 분석 (본인만 표시)</div></div>
+                <Btn onClick={loadMyReport}>{myReport ? "닫기" : "보기"}</Btn>
               </div>
               {myReport && (
-                <div className="fade" style={{ marginTop: 10, borderTop: "1px dashed #eceade", paddingTop: 10 }}>
-                  {myReport.rows.length === 0
-                    ? <div style={{ fontSize: 12, color: "#a9aca7" }}>아직 응시 기록이 없습니다.</div>
-                    : (<React.Fragment>
-                      <div style={{ fontSize: 12.5, marginBottom: 8 }}>학기 정답률 <b style={{ color: "#0F6E56", fontSize: 15 }}>{myReport.tot ? Math.round(myReport.sum / myReport.tot * 100) : 0}%</b> ({myReport.sum}/{myReport.tot}) · Exit 제출 {myReport.exitN}회</div>
-                      {myReport.rows.map((r, k) => (
-                        <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12 }}>
+                <div className="fade" style={{ marginTop: 10, borderTop: "1px dashed #eceade", paddingTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
+                  {myReport.trendComment && <div style={{ fontSize: 12.5, background: "#E7F3EE", color: "#0F6E56", borderRadius: 8, padding: "8px 10px", fontWeight: 700 }}>✨ {myReport.trendComment}</div>}
+
+                  {/* ---- 퀴즈 ---- */}
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 900, color: "#787b82", letterSpacing: ".05em", marginBottom: 6 }}>📝 퀴즈</div>
+                    {myReport.tot === 0 ? <div style={{ fontSize: 12, color: "#a9aca7" }}>아직 응시 기록이 없습니다.</div> : (<React.Fragment>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                        <div style={{ background: "#faf9f4", borderRadius: 10, padding: "6px 12px", textAlign: "center" }}><div style={{ fontSize: 10, color: "#787b82" }}>전체 정답률</div><div style={{ fontSize: 15, fontWeight: 900, color: "#0F6E56" }}>{Math.round(myReport.sum / myReport.tot * 100)}%</div></div>
+                        {myReport.gTot > 0 && <div style={{ background: "#faf9f4", borderRadius: 10, padding: "6px 12px", textAlign: "center" }}><div style={{ fontSize: 10, color: "#787b82" }}>🎯 성적반영</div><div style={{ fontSize: 15, fontWeight: 900 }}>{Math.round(myReport.gSum / myReport.gTot * 100)}%</div></div>}
+                        {myReport.pTot > 0 && <div style={{ background: "#faf9f4", borderRadius: 10, padding: "6px 12px", textAlign: "center" }}><div style={{ fontSize: 10, color: "#787b82" }}>연습</div><div style={{ fontSize: 15, fontWeight: 900 }}>{Math.round(myReport.pSum / myReport.pTot * 100)}%</div></div>}
+                        {myReport.myPercentile !== null && <div style={{ background: "#faf9f4", borderRadius: 10, padding: "6px 12px", textAlign: "center" }}><div style={{ fontSize: 10, color: "#787b82" }}>학기 내 위치</div><div style={{ fontSize: 15, fontWeight: 900 }}>상위 {100 - myReport.myPercentile}%</div></div>}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "#787b82", marginBottom: 4 }}>주차별 추이</div>
+                      {myReport.quizRows.map((r, k) => (
+                        <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", fontSize: 12 }}>
                           <span style={{ minWidth: 34, color: "#787b82" }}>{r.w}주</span>
                           <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}{r.graded && " 🎯"}</span>
                           <span style={{ minWidth: 80, height: 11, background: "#e7e5dc", borderRadius: 4, overflow: "hidden" }}><span style={{ display: "block", width: (r.n ? r.mine / r.n * 100 : 0) + "%", height: "100%", background: "#0E6B5B" }} /></span>
                           <span style={{ fontFamily: "monospace", minWidth: 34, textAlign: "right" }}>{r.mine}/{r.n}</span>
                         </div>
                       ))}
+                      {myReport.wrongList.length > 0 && (
+                        <div style={{ marginTop: 8, borderTop: "1px dashed #eceade", paddingTop: 8 }}>
+                          <div style={{ fontSize: 10.5, color: "#787b82", marginBottom: 4 }}>오답 다시보기 ({myReport.wrongList.length}개)</div>
+                          {myReport.wrongList.slice(0, 8).map((x, k) => (
+                            <div key={k} style={{ fontSize: 11.5, padding: "4px 0", color: "#55585f" }}>· [{x.w}주 {x.setName}] {x.q?.q}</div>
+                          ))}
+                          {myReport.wrongList.length > 8 && <div style={{ fontSize: 11, color: "#a9aca7" }}>외 {myReport.wrongList.length - 8}개 더</div>}
+                        </div>
+                      )}
                     </React.Fragment>)}
+                  </div>
+
+                  {/* ---- 신호등 ---- */}
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 900, color: "#787b82", letterSpacing: ".05em", marginBottom: 6 }}>🚦 신호등</div>
+                    {myReport.sig.total === 0 ? <div style={{ fontSize: 12, color: "#a9aca7" }}>아직 신호 제출 기록이 없습니다.</div> : (<React.Fragment>
+                      <div style={{ display: "flex", height: 24, borderRadius: 8, overflow: "hidden", border: "1.5px solid #24272B", fontSize: 11, fontWeight: 900, marginBottom: 8 }}>
+                        <div style={{ width: myReport.sig.g + "%", background: "#BFE3CF", display: "flex", alignItems: "center", justifyContent: "center" }}>{myReport.sig.g > 8 && "🟢" + myReport.sig.g + "%"}</div>
+                        <div style={{ width: myReport.sig.y + "%", background: "#F6E7B2", display: "flex", alignItems: "center", justifyContent: "center" }}>{myReport.sig.y > 8 && "🟡" + myReport.sig.y + "%"}</div>
+                        <div style={{ width: myReport.sig.r + "%", background: "#F3C1B4", display: "flex", alignItems: "center", justifyContent: "center" }}>{myReport.sig.r > 8 && "🔴" + myReport.sig.r + "%"}</div>
+                      </div>
+                      {myReport.topVolatile.length > 0 && (
+                        <div style={{ fontSize: 11.5, color: "#55585f", marginBottom: 6 }}>신호를 자주 낸 주차: {myReport.topVolatile.map(([w, n]) => w + "주(" + n + "회)").join(", ")}</div>
+                      )}
+                      {Object.keys(myReport.byType).length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 10.5, color: "#787b82", marginBottom: 4 }}>활동 유형별 이해도</div>
+                          {Object.entries(myReport.byType).map(([t, v], k) => (
+                            <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, padding: "2px 0" }}>
+                              <span style={{ minWidth: 70 }}>{t}</span>
+                              <span>🟢{Math.round(v.g / v.total * 100)}% 🟡{Math.round(v.y / v.total * 100)}% 🔴{Math.round(v.r / v.total * 100)}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </React.Fragment>)}
+                  </div>
+
+                  {/* ---- 종합 ---- */}
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 900, color: "#787b82", letterSpacing: ".05em", marginBottom: 6 }}>🔗 종합</div>
+                    {(myReport.metaBuckets.green.tot > 0 || myReport.metaBuckets.red.tot > 0) && (
+                      <div style={{ fontSize: 11.5, color: "#55585f", marginBottom: 6 }}>
+                        자기 모니터링: 🟢라고 느낀 주 정답률 <b>{myReport.metaBuckets.green.tot ? Math.round(myReport.metaBuckets.green.sum / myReport.metaBuckets.green.tot * 100) : "—"}%</b>
+                        {" "}· 🔴라고 느낀 주 정답률 <b>{myReport.metaBuckets.red.tot ? Math.round(myReport.metaBuckets.red.sum / myReport.metaBuckets.red.tot * 100) : "—"}%</b>
+                        {" "}<span style={{ color: "#a9aca7" }}>(주차 단위 비교)</span>
+                      </div>
+                    )}
+                    {myReport.gapTrend.length > 0 && (
+                      <div style={{ marginBottom: 6 }}>
+                        <div style={{ fontSize: 10.5, color: "#787b82", marginBottom: 4 }}>자신감(Exit) × 실제 정답률</div>
+                        {myReport.gapTrend.map((g, k) => (
+                          <div key={k} style={{ fontSize: 11.5, padding: "2px 0" }}>{g.w}주 — 자신감 {g.scale}/5, 정답률 {g.acc}% {g.kind === "over" && <span style={{ color: "#b3402a" }}>(과신)</span>}{g.kind === "under" && <span style={{ color: "#0F6E56" }}>(과소평가)</span>}</div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11.5, color: "#55585f" }}>참여율: {myReport.participation.weeksTotal ? Math.round(myReport.participation.weeksParticipated / myReport.participation.weeksTotal * 100) : 0}% ({myReport.participation.weeksParticipated}/{myReport.participation.weeksTotal}주) · Exit 제출 {myReport.exitN}회</div>
+                  </div>
                 </div>
               )}
             </Card>
